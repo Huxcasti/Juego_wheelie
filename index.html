@@ -116,6 +116,32 @@
       #controls {padding: 0 12px;gap:10px}
       #controls > .btn, #controls > .btn.wheelie, #controls > .btn.gas {width: 43vw;}
     }
+
+    /* Mando de manubrio al lado del FourTrax, con espacio para los dos pedales */
+    #controls{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;padding:0 clamp(10px,3vw,26px);z-index:31}
+    #controls > .steering-control{flex:0 0 auto;width:clamp(106px,31vw,146px);height:clamp(106px,31vw,146px);position:relative;
+      border:2px solid #b9e9e0aa;border-radius:50%;background:radial-gradient(circle at 45% 35%,#263e4aee,#0c1a22ed);
+      box-shadow:inset 0 3px 15px #0009,0 8px 24px #0008;touch-action:none;cursor:grab;display:flex;justify-content:center;align-items:center;
+      -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .steering-control::before{content:"DIRECCIÓN";position:absolute;top:-20px;left:0;right:0;text-align:center;
+      color:#e3f7f0;font-size:10px;font-weight:800;text-shadow:0 2px 4px #000}
+    #steering-wheel{width:90%;height:90%;border-radius:50%;display:grid;place-items:center;pointer-events:none;transition:transform .09s linear}
+    #steering-wheel svg{width:96%;height:96%;filter:drop-shadow(0 2px 2px #0009)}
+    #controls > .btn,#controls > .btn.wheelie,#controls > .btn.gas{flex:0 1 auto;min-width:0;width:clamp(83px,27vw,142px);
+      height:clamp(92px,30vw,116px);border-radius:20px;font-size:clamp(13px,3.8vw,18px)}
+    #controls > .btn.gas{height:clamp(101px,32vw,124px)}
+    #hint{bottom:clamp(145px,37vw,178px);font-size:clamp(11px,2.8vw,14px)}
+    #roadAlert{position:fixed;left:50%;top:calc(max(12px,env(safe-area-inset-top)) + 96px);transform:translateX(-50%);
+      background:#11232bba;color:#fff5d1;border:1px solid #ffdc81a0;padding:7px 12px;border-radius:12px;
+      font-size:12px;font-weight:800;white-space:nowrap;z-index:24;pointer-events:none;opacity:0;transition:opacity .25s}
+    #roadAlert.visible{opacity:1}
+    @media (max-width:375px){
+      #controls{padding:0 8px;gap:6px}
+      #controls > .steering-control{width:102px;height:102px}
+      #controls > .btn,#controls > .btn.wheelie,#controls > .btn.gas{width:calc((100vw - 136px)/2);font-size:12px;height:94px}
+      #controls > .btn.gas{height:106px}
+      #hint{bottom:140px}
+    }
 </style>
 </head>
 <body>
@@ -125,6 +151,7 @@
     <div class="pill"><small>ÁNGULO</small><span id="angle">0°</span></div>
   </div>
 
+  <div id="roadAlert" role="status" aria-live="off"></div>
   <div id="message">WHEELIE CHALLENGE</div>
   <button id="start">COMENZAR</button>
 
@@ -134,9 +161,23 @@
     <input id="modelFile" type="file" accept=".glb,model/gltf-binary" hidden>
   </div>
 
-  <div id="hint">Mantén GAS para acelerar. Pulsa y suelta WHEELIE para controlar el equilibrio.</div>
+  <div id="hint">Gira el manubrio para esquivar. Mantén GAS y controla el WHEELIE.</div>
 
   <div id="controls" aria-label="Controles táctiles del juego">
+    <div id="steering" class="steering-control" role="slider" tabindex="0"
+         aria-label="Manubrio de dirección" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
+      <div id="steering-wheel">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#81999c" stroke-width="7"/>
+          <circle cx="60" cy="60" r="40" fill="none" stroke="#28464f" stroke-width="4"/>
+          <path d="M14 44 L30 44 Q60 56 90 44 L106 44" fill="none" stroke="#e9ece6" stroke-width="7" stroke-linecap="round"/>
+          <path d="M15 39 L26 39 M94 39 L105 39" fill="none" stroke="#17272a" stroke-width="13" stroke-linecap="round"/>
+          <path d="M60 45 L60 77" stroke="#b5c5c5" stroke-width="8" stroke-linecap="round"/>
+          <circle cx="60" cy="61" r="12" fill="#45b9a5" stroke="#ddece7" stroke-width="3"/>
+          <path d="M32 88 Q60 101 88 88" fill="none" stroke="#81b8a9" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
     <button class="btn wheelie" data-key="lift" type="button" aria-label="Levantar ruedas delanteras">WHEELIE</button>
     <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar">GAS</button>
   </div>
@@ -283,6 +324,111 @@
         registerScenery(group, -145 + i * 10);
       }
     }
+
+
+    /* Badenes, lomos y conos en el recorrido: se reciclan por delante del jugador. */
+    const obstacles = [];
+    const trackLength = 310;
+    const warnEl = document.getElementById('roadAlert');
+    function humpGeo(width, length, height) {
+      const vertices = [], indices = [];
+      const subdivisions = 12;
+      for (let i=0; i<=subdivisions; i++){
+        const t=i/subdivisions;
+        const y=.028+height*Math.sin(Math.PI*t);
+        const z=(t-.5)*length;
+        vertices.push(-width/2,y,z, width/2,y,z);
+        if(i<subdivisions){let a=i*2;indices.push(a,a+2,a+1,a+1,a+2,a+3)}
+      }
+      const g=new THREE.BufferGeometry();
+      g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+      g.setIndex(indices);g.computeVertexNormals();return g;
+    }
+    const yellowBump=mat(0xecc13b),blackBump=mat(0x242728),concreteBump=mat(0x9da0a0);
+    function addHump(baseZ,kind,height,length){
+      const group=new THREE.Group();
+      const count=kind==='badén'?1:12;
+      const width=10.8/count;
+      for(let i=0;i<count;i++){
+        const material=kind==='badén'?concreteBump:(i%2?blackBump:yellowBump);
+        material.side=THREE.DoubleSide;
+        const m=new THREE.Mesh(humpGeo(width+.012,length,height),material);
+        m.position.x=-5.4+width*(i+.5);
+        m.castShadow=true;m.receiveShadow=true;group.add(m);
+      }
+      group.position.z=baseZ;scene.add(group);
+      obstacles.push({group,baseZ,kind,height,length,width:10.8,hit:false});
+    }
+    function addCones(baseZ,side){
+      const group=new THREE.Group();
+      group.position.set(side*2.65,0,baseZ);
+      const coneColor=mat(0xf68223),coneWhite=mat(0xf4ece2);
+      for(let k=0;k<3;k++){
+        const cone=new THREE.Mesh(new THREE.ConeGeometry(.27,.72,8),coneColor);
+        cone.position.set((k-1)*.65,.37,0);cone.castShadow=true;group.add(cone);
+        const stripe=new THREE.Mesh(new THREE.CylinderGeometry(.15,.21,.10,8),coneWhite);
+        stripe.position.set((k-1)*.65,.31,0);group.add(stripe);
+        const foot=new THREE.Mesh(new THREE.BoxGeometry(.45,.07,.45),blackBump);
+        foot.position.set((k-1)*.65,.04,0);group.add(foot);
+      }
+      scene.add(group);obstacles.push({group,baseZ,kind:'conos',height:.7,length:1,width:2,hit:false});
+    }
+    addHump(-38,'reductor',.17,1.7);
+    addCones(-66,-1);
+    addHump(-100,'badén',.37,4.2);
+    addHump(-148,'reductor',.19,1.3);
+    addCones(-192,1);
+    addHump(-232,'badén',.28,3.5);
+    addHump(-282,'reductor',.22,1.7);
+
+    function positionObstacles(traveled){
+      for(const o of obstacles){
+        let relative=o.baseZ+traveled;
+        while(relative>24)relative-=trackLength;
+        while(relative<-trackLength+24)relative+=trackLength;
+        const pos=-traveled+relative;
+        if(Math.abs(pos-o.group.position.z)>trackLength*.5)o.hit=false;
+        o.group.position.z=pos;
+      }
+    }
+    function obstacleHeightAt(z,x){
+      if(Math.abs(x)>5.5)return 0;
+      let height=0;
+      for(const o of obstacles){
+        if(o.kind==='conos')continue;
+        const t=(z-o.group.position.z)/o.length+.5;
+        if(t>0&&t<1)height=Math.max(height,o.height*Math.sin(Math.PI*t));
+      }
+      return height;
+    }
+    function updateObstacleGameplay(dt) {
+      positionObstacles(distance);
+      const frontHeight=obstacleHeightAt(rider.position.z-vehicleLength*.35,rider.position.x);
+      const rearHeight=obstacleHeightAt(rider.position.z+rearAxleZ*.9,rider.position.x);
+      const surfaceHeight=Math.max(frontHeight,rearHeight);
+      rider.position.y=THREE.MathUtils.damp(rider.position.y,surfaceHeight+Math.sin(Math.max(0,tilt))*.05,12,dt);
+      // El badén desestabiliza el wheelie, más notable a velocidad alta.
+      if(surfaceHeight>.04)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
+      for(const o of obstacles){
+        if(o.kind!=='conos'||o.hit)continue;
+        const inZ=Math.abs(o.group.position.z-rider.position.z)<.85;
+        const inX=Math.abs(o.group.position.x-rider.position.x)<1.35;
+        if(inZ&&inX){
+          o.hit=true;speed*=.57;tilt=Math.min(1.62,tilt+.20);
+          messageEl.textContent='¡GOLPEASTE LOS CONOS!';
+        }
+      }
+      let closest=null;
+      for(const o of obstacles){
+        const d=rider.position.z-o.group.position.z;
+        if(d>0&&d<36&&(!closest||d<closest.d))closest={o,d};
+      }
+      if(closest){
+        warnEl.textContent='⚠ '+(closest.o.kind==='conos'?'CONOS':closest.o.kind==='badén'?'BADÉN':'REDUCTOR')+' · '+Math.ceil(closest.d)+' m';
+        warnEl.classList.add('visible');
+      }else warnEl.classList.remove('visible');
+    }
+    positionObstacles(0);
 
     const rider = new THREE.Group();
     scene.add(rider);
@@ -545,6 +691,37 @@
       modelStatus.textContent = 'Elige el Honda Fourtrax .glb para usarlo';
     })();
 
+
+    // Guía táctil tipo manubrio: desliza lateralmente; vuelve al centro al soltar.
+    const steeringEl=document.getElementById('steering');
+    const steeringWheelEl=document.getElementById('steering-wheel');
+    let steerValue=0,keyboardSteer=0,lateralMotion=0;
+    function setSteer(value){
+      steerValue=THREE.MathUtils.clamp(value,-1,1);
+      steeringWheelEl.style.transform='rotate('+(-steerValue*43)+'deg)';
+      steeringEl.setAttribute('aria-valuenow',String(Math.round(steerValue*100)));
+    }
+    function steeringAt(clientX){
+      const r=steeringEl.getBoundingClientRect();
+      setSteer(((clientX-r.left)/r.width-.5)*2.3);
+    }
+    steeringEl.addEventListener('pointerdown',e=>{
+      e.preventDefault();steeringEl.setPointerCapture(e.pointerId);steeringAt(e.clientX);
+    });
+    steeringEl.addEventListener('pointermove',e=>{
+      if(steeringEl.hasPointerCapture(e.pointerId)){e.preventDefault();steeringAt(e.clientX);}
+    });
+    for(const event of ['pointerup','pointercancel','lostpointercapture'])steeringEl.addEventListener(event,()=>setSteer(0));
+    steeringEl.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+    steeringEl.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+    steeringEl.addEventListener('keydown',e=>{
+      if(e.code==='ArrowLeft'){setSteer(-1);e.preventDefault();}
+      if(e.code==='ArrowRight'){setSteer(1);e.preventDefault();}
+    });
+    steeringEl.addEventListener('keyup',e=>{if(e.code==='ArrowLeft'||e.code==='ArrowRight')setSteer(0)});
+    addEventListener('keydown',e=>{if(e.code==='KeyA')keyboardSteer=-1;if(e.code==='KeyD')keyboardSteer=1;});
+    addEventListener('keyup',e=>{if(e.code==='KeyA'||e.code==='KeyD')keyboardSteer=0;});
+
     const keys = { gas: false, lift: false };
     document.querySelectorAll('#controls [data-key]').forEach(btn => {
       const key = btn.dataset.key;
@@ -597,6 +774,9 @@
       elapsed = 0;
       distance = 0;
       wheelSpin = 0;
+      lateralMotion = 0;setSteer(0);
+      positionObstacles(0);
+      warnEl.classList.remove('visible');
       wasWheelie = false;
       rider.position.set(0, 0, 0);
       rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
@@ -649,6 +829,11 @@
       if (active) {
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
         distance += speed * dt;
+        const targetSteer=steerValue || keyboardSteer;
+        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,6,dt);
+        rider.position.x=THREE.MathUtils.clamp(rider.position.x+lateralMotion*dt*(2.2+speed*.13),-4.6,4.6);
+        rider.rotation.y=-lateralMotion*.14;
+        rider.rotation.z=-lateralMotion*.045;
 
         // Con dos botones se controla el ángulo pulsando y soltando WHEELIE.
         // Más lento que antes para poder hacer récords sin ADELANTE/ATRÁS.
@@ -683,7 +868,7 @@
         angleEl.style.color = tilt > 1.27 ? '#ffbd8f' : '#ffffff';
 
         rider.position.z = -distance;
-        rider.position.y = Math.max(0, Math.sin(Math.max(0, tilt)) * 0.05);
+        updateObstacleGameplay(dt);
         rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
         vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
         rearPivot.rotation.x = tilt;
@@ -691,8 +876,8 @@
         updateRoadWrap();
       }
 
-      camera.position.lerp(new THREE.Vector3(0, 2.8, rider.position.z + 6.2), 0.08);
-      camera.lookAt(0, 1.15 + rider.position.y * 0.25, rider.position.z - 2.3);
+      camera.position.lerp(new THREE.Vector3(rider.position.x*.8, 2.8+rider.position.y*.45, rider.position.z + 6.2), 0.08);
+      camera.lookAt(rider.position.x, 1.15+rider.position.y*.25, rider.position.z - 2.3);
       renderer.render(scene, camera);
     }
 
