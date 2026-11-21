@@ -48,7 +48,17 @@
       #hint{bottom:122px;font-size:12px}
       .pill span{font-size:17px}
     }
-  </style>
+  
+    /* Ajuste final: cuatro controles visibles sin desbordarse en iPhone */
+    @media (max-width:540px){
+      #controls{gap:8px;padding:0 8px;bottom:max(10px,env(safe-area-inset-bottom))}
+      #controls .side{flex:1;min-width:0;gap:7px;margin-left:0}
+      #controls .btn,#controls .btn.small,#controls .btn.wheelie,#controls .btn.gas{min-width:0;width:100%;flex:1;padding:0 3px;font-size:clamp(11px,3.1vw,16px);border-radius:18px}
+      #controls .btn.small{height:82px}
+      #controls .btn.wheelie{height:92px}
+      #controls .btn.gas{height:106px}
+    }
+</style>
 </head>
 <body>
   <div id="hud">
