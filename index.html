@@ -78,7 +78,7 @@ fileInput.addEventListener('change',async()=>{
  fileInput.value='';
 });
 (async()=>{
- try{await loadFourtrax('./assets/fourtrax.glb');return}catch(err){console.info('Archivo remoto aún no cargado.',err)}
+ try{await loadFourtrax('./assets/3d-honda-fourtrax-atv.glb');return}catch(err){console.info('Archivo remoto aún no cargado.',err)}
  try{
  const saved=await savedModelFile();
  if(saved){await loadFourtrax(saved);return}
