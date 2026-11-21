@@ -294,6 +294,7 @@
     let importedModel = null;
     let importedWheelGroups = [];
     let modelLoaded = false;
+    let realTireRotation = null;
     let vehicleLength = 1.85;
     let rearAxleZ = 0.75;
     let bodyClearance = 0.18;
@@ -301,6 +302,7 @@
     function clearVehicle() {
       while (vehicle.children.length) vehicle.remove(vehicle.children[0]);
       importedWheelGroups = [];
+      realTireRotation = null;
     }
 
     function makeWheel(radius = 0.34, tube = 0.12) {
@@ -404,24 +406,66 @@
       rearAxleZ = tmpSize.z * 0.33;
       bodyClearance = lift;
 
-      const halfW = tmpSize.x * 0.47;
-      const halfL = tmpSize.z * 0.35;
-      const wheelY = lift + tmpSize.y * 0.17;
-      const wheelR = Math.max(0.24, Math.min(tmpSize.y * 0.16, tmpSize.x * 0.13));
-      const wheelT = wheelR * 0.35;
+      // No colocar neumáticos artificiales encima de las gomas del Honda.
+      // En el GLB original todos los neumáticos forman parte de una sola malla.
       importedWheelGroups = [];
-      const positions = [
-        [-halfW, wheelY, -halfL],
-        [ halfW, wheelY, -halfL],
-        [-halfW, wheelY,  halfL],
-        [ halfW, wheelY,  halfL],
-      ];
-      for (const pos of positions) {
-        const w = makeWheel(wheelR, wheelT);
-        w.position.set(...pos);
-        vehicle.add(w);
-        importedWheelGroups.push(w);
-      }
+      enableOriginalTireRotation(model);
+    }
+
+
+    function enableOriginalTireRotation(model) {
+      // La geometría de este Honda FourTrax es una única malla texturizada:
+      // animamos las regiones de las cuatro gomas en la GPU, sin ruedas falsas.
+      const spin = { value: 0 };
+      const nl = String.fromCharCode(10);
+      const tireFunctions = [
+        'uniform float uFourtraxWheelAngle;',
+        'float fourtraxWheelMask(vec3 p) {',
+        '  float cz = p.z < 0.0 ? -0.633 : 0.590;',
+        '  float radius = length(vec2(p.y + 0.286, p.z - cz));',
+        '  return smoothstep(0.322, 0.362, abs(p.x)) * (1.0 - smoothstep(0.249, 0.311, radius));',
+        '}',
+        'vec3 fourtraxRotatePoint(vec3 p) {',
+        '  float a = uFourtraxWheelAngle * fourtraxWheelMask(p);',
+        '  float c = cos(a), sn = sin(a);',
+        '  float cz = p.z < 0.0 ? -0.633 : 0.590;',
+        '  float dy = p.y + 0.286, dz = p.z - cz;',
+        '  return vec3(p.x, -0.286 + c * dy - sn * dz, cz + sn * dy + c * dz);',
+        '}',
+        'vec3 fourtraxRotateNormal(vec3 p, vec3 n) {',
+        '  float a = uFourtraxWheelAngle * fourtraxWheelMask(p);',
+        '  float c = cos(a), sn = sin(a);',
+        '  return vec3(n.x, c*n.y - sn*n.z, sn*n.y + c*n.z);',
+        '}'
+      ].join(nl);
+      let modifiedCount = 0;
+      model.traverse(obj => {
+        if (!obj.isMesh || !obj.geometry?.getAttribute('position')) return;
+        const sourceMaterials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const materials = sourceMaterials.map(source => {
+          const material = source.clone();
+          material.onBeforeCompile = shader => {
+            shader.uniforms.uFourtraxWheelAngle = spin;
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <common>', '#include <common>' + nl + tireFunctions
+            );
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <beginnormal_vertex>',
+              '#include <beginnormal_vertex>' + nl + 'objectNormal = fourtraxRotateNormal(position, objectNormal);'
+            );
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>' + nl + 'transformed = fourtraxRotatePoint(position);'
+            );
+          };
+          material.customProgramCacheKey = () => 'fourtrax-original-wheels-shader-v5';
+          material.needsUpdate = true;
+          return material;
+        });
+        obj.material = Array.isArray(obj.material) ? materials : materials[0];
+        modifiedCount++;
+      });
+      realTireRotation = modifiedCount ? spin : null;
     }
 
     function useFourtrax(sceneModel) {
@@ -608,18 +652,20 @@
 
         // Con dos botones se controla el ángulo pulsando y soltando WHEELIE.
         // Más lento que antes para poder hacer récords sin ADELANTE/ATRÁS.
-        const liftForce = keys.lift && speed > 2.8 ? 0.68 : 0;
-        tilt += ((liftForce - 0.34 - Math.sin(tilt) * 0.12) * dt);
+        // El jugador puede hacer wheelies altos manteniendo WHEELIE.
+        // Suelta el botón para bajar y mantener el punto de equilibrio.
+        const liftForce = keys.lift && speed > 2.8 ? 1.03 : 0;
+        tilt += ((liftForce - 0.31 - Math.sin(tilt) * 0.13) * dt);
         tilt = Math.max(-0.05, tilt);
 
-        const validWheelie = tilt > 0.16 && tilt < 0.98 && speed > 2;
+        const validWheelie = tilt > 0.16 && tilt < 1.48 && speed > 2;
         if (validWheelie) {
           elapsed += dt;
           wasWheelie = true;
           messageEl.textContent = '¡MANTÉN EL EQUILIBRIO!';
         } else if (wasWheelie && tilt < 0.10) {
           finish();
-        } else if (tilt >= 0.98) {
+        } else if (tilt >= 1.53) {
           finish();
         } else if (speed < 2) {
           messageEl.textContent = '¡ACELERA PARA LEVANTAR!';
@@ -627,11 +673,14 @@
           messageEl.textContent = '¡PRESIONA WHEELIE!';
         }
 
-        wheelSpin += speed * dt / 0.33;
+        wheelSpin = (wheelSpin + speed * dt / 0.33) % (Math.PI * 2);
+        // Las cuatro gomas texturizadas del modelo real giran juntas.
+        if (realTireRotation) realTireRotation.value = wheelSpin;
         for (const w of importedWheelGroups) w.rotation.x = wheelSpin;
 
         timeEl.textContent = elapsed.toFixed(2) + ' s';
         angleEl.textContent = Math.max(0, tilt * 180 / Math.PI).toFixed(0) + '°';
+        angleEl.style.color = tilt > 1.27 ? '#ffbd8f' : '#ffffff';
 
         rider.position.z = -distance;
         rider.position.y = Math.max(0, Math.sin(Math.max(0, tilt)) * 0.05);
