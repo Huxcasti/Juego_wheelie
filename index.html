@@ -6,15 +6,45 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x9cc5d5);scene.fog=new THREE.Fog(0x9cc5d5,35,145);
-const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,300);const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;document.body.prepend(renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff,0x526548,2));const sun=new THREE.DirectionalLight(0xffffff,2.3);sun.position.set(-15,25,20);sun.castShadow=true;scene.add(sun);
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,300);const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x526548,2));const sun=new THREE.DirectionalLight(0xffffff,2.3);sun.position.set(-15,25,20);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-26;sun.shadow.camera.right=26;sun.shadow.camera.top=26;sun.shadow.camera.bottom=-26;sun.shadow.normalBias=.015;scene.add(sun);
 const mat=(c)=>new THREE.MeshStandardMaterial({color:c,roughness:.8});const asphalt=mat(0x353b40),grass=mat(0x58885b),white=mat(0xf4e8c0);
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(2000,2000),grass);ground.rotation.x=-Math.PI/2;scene.add(ground);
-const road=new THREE.Mesh(new THREE.PlaneGeometry(12,2000),asphalt);road.rotation.x=-Math.PI/2;road.position.y=.012;scene.add(road);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(2000,2000),grass);ground.rotation.x=-Math.PI/2;ground.position.y=-.10;ground.receiveShadow=true;scene.add(ground);
+const road=new THREE.Mesh(new THREE.PlaneGeometry(12,2000),asphalt);road.rotation.x=-Math.PI/2;road.position.y=0;road.receiveShadow=true;scene.add(road);
+const shoulder=new THREE.Mesh(new THREE.PlaneGeometry(15,2000),mat(0xb79d79));shoulder.rotation.x=-Math.PI/2;shoulder.position.y=-.04;shoulder.receiveShadow=true;scene.add(shoulder);
+const roadEdges=[];for(const side of [-1,1]){const edge=new THREE.Mesh(new THREE.BoxGeometry(.13,.018,2000),mat(0xe3decb));edge.position.set(side*5.84,.019,0);scene.add(edge);roadEdges.push(edge);}
+const landscape=[];const trunkMat=mat(0x70513b),leafMat=mat(0x356448),leafMat2=mat(0x4b7855),houseMat=[mat(0xc3b69b),mat(0xd6c5a8),mat(0x9faeba),mat(0xc7c7bc)];const roofMat=mat(0x9f5c46),postMat=mat(0x666c70);
+const treeTrunkGeo=new THREE.CylinderGeometry(.17,.25,2.5,6),treeCrownGeo=new THREE.ConeGeometry(1.45,3.6,7),houseGeo=new THREE.BoxGeometry(5.5,3.2,5),roofGeo=new THREE.ConeGeometry(4.2,2,4);
+function putLandscape(group,z){group.position.z=z;scene.add(group);landscape.push({group,z});}
+for(let i=0;i<34;i++)for(const side of [-1,1]){
+ const z=-152+i*9+side*2;
+ const group=new THREE.Group();group.position.x=side*(10+(i%4)*2);
+ if(i%6===0){
+  const house=new THREE.Mesh(houseGeo,houseMat[i%houseMat.length]);house.position.y=1.6;house.castShadow=true;house.receiveShadow=true;group.add(house);
+  const roof=new THREE.Mesh(roofGeo,roofMat);roof.rotation.y=Math.PI/4;roof.position.y=4.15;roof.castShadow=true;group.add(roof);
+  for(const wx of [-1.4,1.4]){const win=new THREE.Mesh(new THREE.PlaneGeometry(.9,1.0),new THREE.MeshBasicMaterial({color:0xbce7f4,side:THREE.DoubleSide}));win.position.set(wx,2.1,-2.52);group.add(win)}
+ }else{
+  for(let j=0;j<2;j++){const x=(j-.5)*2.9;
+   const trunk=new THREE.Mesh(treeTrunkGeo,trunkMat);trunk.position.set(x,1.2,0);trunk.castShadow=true;group.add(trunk);
+   const crown=new THREE.Mesh(treeCrownGeo,i%2?leafMat:leafMat2);crown.position.set(x,3.2,0);crown.castShadow=true;group.add(crown);
+  }
+ }putLandscape(group,z);
+}
+for(let i=0;i<29;i++)for(const side of [-1,1]){
+ const group=new THREE.Group();group.position.x=side*7;
+ const pole=new THREE.Mesh(new THREE.CylinderGeometry(.055,.075,5,6),postMat);pole.position.y=2.5;group.add(pole);
+ const arm=new THREE.Mesh(new THREE.BoxGeometry(1,.08,.12),postMat);arm.position.set(-side*.47,4.9,0);group.add(arm);
+ const lamp=new THREE.Mesh(new THREE.BoxGeometry(.5,.09,.3),new THREE.MeshBasicMaterial({color:0xfff2be}));lamp.position.set(-side*.85,4.8,0);group.add(lamp);
+ putLandscape(group,-145+i*10);
+}
+const signGroup=new THREE.Group();signGroup.position.x=-10;
+const signPost=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,3.4,6),postMat);signPost.position.y=1.7;signGroup.add(signPost);
+const signBoard=new THREE.Mesh(new THREE.BoxGeometry(4.2,1.45,.18),mat(0x173b49));signBoard.position.y=3.9;signGroup.add(signBoard);
+putLandscape(signGroup,-65);
 const stripes=[];for(let i=0;i<25;i++){const s=new THREE.Mesh(new THREE.PlaneGeometry(.14,3),white);s.rotation.x=-Math.PI/2;s.position.set(0,.03,-i*12+12);scene.add(s);stripes.push(s)}
-const rider=new THREE.Group();scene.add(rider);const pitch=new THREE.Group();rider.add(pitch);
+const rider=new THREE.Group();scene.add(rider);const rearPivot=new THREE.Group();rider.add(rearPivot);const pitch=new THREE.Group();rearPivot.add(pitch);rearPivot.position.set(0,.36,.93);pitch.position.set(0,-.36,-.93);let wheelSpin=0,wheelUniform=null;const fallbackWheels=[];
 function cube(w,h,d,c,x,y,z){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c));m.position.set(x,y,z);pitch.add(m);return m}
-function wheel(x,z){const t=new THREE.Mesh(new THREE.TorusGeometry(.43,.16,12,20),mat(0x141719));t.rotation.y=Math.PI/2;t.position.set(x,.54,z);pitch.add(t);const hub=new THREE.Mesh(new THREE.CylinderGeometry(.21,.21,.19,16),mat(0xaeb8bc));hub.rotation.z=Math.PI/2;hub.position.copy(t.position);pitch.add(hub)}
+function wheel(x,z){const wheelGroup=new THREE.Group();wheelGroup.position.set(x,.54,z);pitch.add(wheelGroup);fallbackWheels.push(wheelGroup);const t=new THREE.Mesh(new THREE.TorusGeometry(.43,.16,12,20),mat(0x141719));t.rotation.y=Math.PI/2;t.position.set(0,0,0);wheelGroup.add(t);const hub=new THREE.Mesh(new THREE.CylinderGeometry(.21,.21,.19,16),mat(0xaeb8bc));hub.rotation.z=Math.PI/2;hub.position.copy(t.position);wheelGroup.add(hub)}
 cube(1.25,.3,1.65,0xb71f26,0,1.13,0);cube(.7,.22,.7,0x181a1c,0,1.39,.25);cube(.85,.14,.38,0x272a2e,0,1.55,-.6);cube(1.65,.13,.16,0x9fa7ac,0,1.9,-.73);
 for(const x of [-.75,.75])for(const z of [-.83,.83])wheel(x,z);
 
@@ -32,8 +62,42 @@ function useFourtrax(sceneModel){
   model.position.set(model.position.x-ctr.x,model.position.y-bounds.min.y+.02,model.position.z-ctr.z);
   model.updateMatrixWorld(true);
   model.traverse(obj=>{if(obj.isMesh){obj.castShadow=true;obj.receiveShadow=true;}});
-  pitch.clear();pitch.add(model);modelLoaded=true;
+  pitch.clear();fallbackWheels.length=0;pitch.add(model);animateImportedTires(model);modelLoaded=true;
   modelStatus.textContent='✓ HONDA FOURTRAX 3D CARGADO';
+}
+
+function animateImportedTires(sceneModel) {
+  wheelUniform={value:0};
+  sceneModel.traverse(object=>{
+    if(!object.isMesh)return;
+    // El archivo Honda GLB original trae las cuatro gomas en UNA malla.
+    // Mover sus vértices en el shader permite girarlas sin borrar su textura.
+    const material=object.material.clone();object.material=material;
+    material.onBeforeCompile=shader=>{
+      shader.uniforms.uWheelSpin=wheelUniform;
+      shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\n uniform float uWheelSpin;');
+      shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
+float wheelZ=(position.z<0.0)?-0.65:0.61;
+float dy=position.y+0.33, dz=position.z-wheelZ;
+float mask=step(0.29,abs(position.x))*step(0.36,abs(position.z))*(1.0-smoothstep(0.215,0.245,length(vec2(dy,dz))));
+float a=uWheelSpin*mask;
+float cs=cos(a),sn=sin(a);
+transformed.y=-0.33+cs*dy-sn*dz;
+transformed.z=wheelZ+sn*dy+cs*dz;
+`);
+      shader.vertexShader=shader.vertexShader.replace('#include <beginnormal_vertex>',`#include <beginnormal_vertex>
+float zc=(position.z<0.0)?-0.65:0.61;
+float rr=length(vec2(position.y+0.33,position.z-zc));
+float nm=step(0.29,abs(position.x))*step(0.36,abs(position.z))*(1.0-smoothstep(0.215,0.245,rr));
+float wa=uWheelSpin*nm;
+float yc=objectNormal.y, zc2=objectNormal.z;
+objectNormal.y=cos(wa)*yc-sin(wa)*zc2;
+objectNormal.z=sin(wa)*yc+cos(wa)*zc2;
+`);
+    };
+    material.customProgramCacheKey=()=> 'huxcasti-fourtrax-rotating-tires-v2';
+    material.needsUpdate=true;
+  });
 }
 const loader=new GLTFLoader();
 function loadFourtrax(source){
@@ -89,15 +153,22 @@ const keys={gas:false,lift:false,up:false,down:false};document.querySelectorAll(
 const keymap={ArrowUp:'gas',Space:'lift',ArrowLeft:'down',ArrowRight:'up',KeyW:'gas',KeyS:'down',KeyD:'up'};addEventListener('keydown',e=>{if(keymap[e.code]){keys[keymap[e.code]]=true;e.preventDefault()}});addEventListener('keyup',e=>{if(keymap[e.code])keys[keymap[e.code]]=false});
 let active=false,speed=0,tilt=0,elapsed=0,record=Number(localStorage.getItem('wheelie-best')||0),distance=0,last=performance.now(),wasWheelie=false;
 const timeEl=document.querySelector('#time'),bestEl=document.querySelector('#best'),angleEl=document.querySelector('#angle'),message=document.querySelector('#message'),start=document.querySelector('#start');bestEl.textContent=record.toFixed(2)+' s';
-function reset(){document.body.classList.add('playing');active=true;speed=0;tilt=0;elapsed=0;distance=0;wasWheelie=false;rider.position.set(0,0,0);message.textContent='¡ACELERA!';start.hidden=true}
+function reset(){document.body.classList.add('playing');active=true;speed=0;tilt=0;elapsed=0;distance=0;wasWheelie=false;rider.position.set(0,0,0);pitch.rotation.set(0,0,0);wheelSpin=0;message.textContent='¡ACELERA!';start.hidden=true}
 start.addEventListener('click',reset);
 function finish(){document.body.classList.remove('playing');active=false;if(elapsed>record){record=elapsed;localStorage.setItem('wheelie-best',record.toFixed(3));bestEl.textContent=record.toFixed(2)+' s'}message.textContent='¡INTENTO TERMINADO! '+elapsed.toFixed(2)+' s';start.textContent='REINTENTAR';start.hidden=false}
 function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.04);last=now;
 if(active){speed=Math.max(0,Math.min(24,speed+(keys.gas?9:-7)*dt));distance+=speed*dt;let force=(keys.lift&&speed>3?1.6:0)+(keys.down?.85:0)-(keys.up?1.4:0);tilt+=((force-.56-Math.sin(tilt)*.15)*dt);tilt=Math.max(-.12,tilt);const valid=tilt>.20&&tilt<1.12&&speed>2;
 if(valid){elapsed+=dt;wasWheelie=true;message.textContent='¡MANTÉN EL EQUILIBRIO!'}else if(wasWheelie&&tilt<.13){finish()}else if(tilt>=1.12){finish()}else if(speed<2){message.textContent='¡ACELERA PARA LEVANTAR!'}else{message.textContent='¡PRESIONA WHEELIE!'}
-timeEl.textContent=elapsed.toFixed(2)+' s';angleEl.textContent=Math.max(0,tilt*180/Math.PI).toFixed(0)+'°';rider.position.z=-distance;pitch.rotation.x=-tilt;
-for(let i=0;i<stripes.length;i++){const z=12-i*12;stripes[i].position.z=z-Math.floor((distance+12)/300)*300}
+timeEl.textContent=elapsed.toFixed(2)+' s';angleEl.textContent=Math.max(0,tilt*180/Math.PI).toFixed(0)+'°';rider.position.z=-distance;pitch.rotation.x=tilt;
+wheelSpin+=speed*dt/.35;
+if(wheelUniform)wheelUniform.value=wheelSpin;
+for(const w of fallbackWheels)w.rotation.x=wheelSpin;
+ground.position.z=rider.position.z;road.position.z=rider.position.z;shoulder.position.z=rider.position.z;
+for(const edge of roadEdges)edge.position.z=rider.position.z;
+for(const item of landscape){item.group.position.z=rider.position.z+(((item.z+distance+155)%310+310)%310-155);}
+
+for(let i=0;i<stripes.length;i++){const z=12-i*12;stripes[i].position.z=rider.position.z+(((z+distance+155)%310+310)%310-155)}
 }
-camera.position.lerp(new THREE.Vector3(0,4.1,rider.position.z+8.5),.075);camera.lookAt(0,1.15,rider.position.z-3);renderer.render(scene,camera)}
+camera.position.lerp(new THREE.Vector3(0,2.95,rider.position.z+6.35),.075);camera.lookAt(0,1.05,rider.position.z-2.2);renderer.render(scene,camera)}
 requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 </script></body></html>
