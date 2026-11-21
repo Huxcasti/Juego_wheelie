@@ -58,6 +58,64 @@
       #controls .btn.wheelie{height:92px}
       #controls .btn.gas{height:106px}
     }
+
+    /* Dos controles grandes, separados y sin selección, lupa ni menú Copiar de iOS */
+    html, body, body *, button, canvas {
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-touch-callout: none !important;
+      -webkit-tap-highlight-color: transparent !important;
+      -webkit-user-drag: none;
+    }
+    #controls {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: max(16px, env(safe-area-inset-bottom));
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 clamp(16px, 5vw, 44px);
+      z-index: 30;
+      touch-action: none;
+      -webkit-touch-callout: none;
+    }
+    #controls > .btn, #controls > .btn.wheelie, #controls > .btn.gas {
+      -webkit-appearance: none;
+      appearance: none;
+      box-sizing: border-box;
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: clamp(122px, 36vw, 182px);
+      min-width: 0;
+      height: 106px;
+      border-radius: 24px;
+      font-size: clamp(15px, 4vw, 19px);
+      font-weight: 900;
+      padding: 0 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      touch-action: none;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-touch-callout: none !important;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #controls > .btn.gas {background:#188c76; height:112px}
+    #controls > .btn.wheelie {background:#19364a; height:100px}
+    #controls > .btn.pressed, #controls > .btn:active {
+      background:#29a9a0;
+      border-color:#9df2eb;
+      transform:scale(.98);
+    }
+    #hint { bottom: 148px; font-size: 12px; line-height: 1.35; padding: 0 10px; }
+    @media (max-width:350px){
+      #controls {padding: 0 12px;gap:10px}
+      #controls > .btn, #controls > .btn.wheelie, #controls > .btn.gas {width: 43vw;}
+    }
 </style>
 </head>
 <body>
@@ -76,17 +134,11 @@
     <input id="modelFile" type="file" accept=".glb,model/gltf-binary" hidden>
   </div>
 
-  <div id="hint">Acelera y mantén WHEELIE. Corrige con ADELANTE / ATRÁS.</div>
+  <div id="hint">Mantén GAS para acelerar. Pulsa y suelta WHEELIE para controlar el equilibrio.</div>
 
-  <div id="controls">
-    <div class="side left">
-      <button class="btn small" data-key="down">ATRÁS</button>
-      <button class="btn small" data-key="up">ADELANTE</button>
-    </div>
-    <div class="side right">
-      <button class="btn wheelie" data-key="lift">WHEELIE</button>
-      <button class="btn gas" data-key="gas">GAS</button>
-    </div>
+  <div id="controls" aria-label="Controles táctiles del juego">
+    <button class="btn wheelie" data-key="lift" type="button" aria-label="Levantar ruedas delanteras">WHEELIE</button>
+    <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar">GAS</button>
   </div>
 
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
@@ -449,15 +501,30 @@
       modelStatus.textContent = 'Elige el Honda Fourtrax .glb para usarlo';
     })();
 
-    const keys = { gas: false, lift: false, up: false, down: false };
-    document.querySelectorAll('[data-key]').forEach(btn => {
+    const keys = { gas: false, lift: false };
+    document.querySelectorAll('#controls [data-key]').forEach(btn => {
       const key = btn.dataset.key;
       const set = value => { keys[key] = value; btn.classList.toggle('pressed', value); };
-      btn.addEventListener('pointerdown', e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); set(true); });
+      btn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+        set(true);
+      });
+      // Evita que Safari interprete una pulsación larga como texto para copiar.
+      btn.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+      btn.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, () => set(false));
     });
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('selectstart', e => e.preventDefault());
+    document.addEventListener('dragstart', e => e.preventDefault());
+    window.addEventListener('blur', () => {
+      keys.gas = false; keys.lift = false;
+      document.querySelectorAll('#controls .pressed').forEach(b => b.classList.remove('pressed'));
+    });
 
-    const keymap = { ArrowUp: 'gas', Space: 'lift', ArrowLeft: 'down', ArrowRight: 'up', KeyW: 'gas', KeyS: 'down', KeyD: 'up' };
+    const keymap = { ArrowUp: 'gas', Space: 'lift', KeyW: 'gas' };
     addEventListener('keydown', e => { if (keymap[e.code]) { keys[keymap[e.code]] = true; e.preventDefault(); } });
     addEventListener('keyup', e => { if (keymap[e.code]) keys[keymap[e.code]] = false; });
 
@@ -539,8 +606,10 @@
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
         distance += speed * dt;
 
-        const liftForce = (keys.lift && speed > 2.8 ? 1.62 : 0) + (keys.down ? 0.92 : 0) - (keys.up ? 1.36 : 0);
-        tilt += ((liftForce - 0.60 - Math.sin(tilt) * 0.16) * dt);
+        // Con dos botones se controla el ángulo pulsando y soltando WHEELIE.
+        // Más lento que antes para poder hacer récords sin ADELANTE/ATRÁS.
+        const liftForce = keys.lift && speed > 2.8 ? 0.68 : 0;
+        tilt += ((liftForce - 0.34 - Math.sin(tilt) * 0.12) * dt);
         tilt = Math.max(-0.05, tilt);
 
         const validWheelie = tilt > 0.16 && tilt < 0.98 && speed > 2;
