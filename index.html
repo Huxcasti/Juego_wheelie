@@ -823,6 +823,77 @@
     addEventListener('keydown',e=>{if(e.code==='KeyA')keyboardSteer=-1;if(e.code==='KeyD')keyboardSteer=1;});
     addEventListener('keyup',e=>{if(e.code==='KeyA'||e.code==='KeyD')keyboardSteer=0;});
 
+
+    /* Carros que vienen de frente. Las distancias están relativas al FourTrax,
+       por lo que el tráfico sigue apareciendo a medida que avanzas. */
+    const oncomingCars = [];
+    const vehiclePaints = [0xc23737, 0x2664be, 0xb9b7b0, 0xe6bd4b, 0x286b59];
+    const glassPaint = mat(0x789aa8), tirePaint = mat(0x17191b);
+    const lampPaint = new THREE.MeshBasicMaterial({color:0xfff2bf});
+    function makeOncomingCar(color) {
+      const group = new THREE.Group();
+      const carPaint = mat(color);
+      function carPart(w,h,d,x,y,z,material) {
+        const part = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+        part.position.set(x,y,z);part.castShadow=true;part.receiveShadow=true;group.add(part);
+        return part;
+      }
+      carPart(1.65,.48,2.85,0,.61,0,carPaint);
+      carPart(1.40,.52,1.32,0,1.09,-.17,glassPaint);
+      carPart(1.47,.10,.27,0,1.34,-.87,carPaint);
+      for(const x of [-.55,.55]){
+        carPart(.32,.18,.07,x,.61,1.45,lampPaint);
+        carPart(.26,.12,.06,x,.59,-1.45,mat(0xa9362f));
+      }
+      const rolling = [];
+      for(const x of [-.85,.85]) for(const z of [-.90,.90]){
+        const pivot = new THREE.Group();pivot.position.set(x,.34,z);
+        const tire = new THREE.Mesh(new THREE.CylinderGeometry(.30,.30,.22,12),tirePaint);
+        tire.rotation.z = Math.PI/2;pivot.add(tire);group.add(pivot);rolling.push(pivot);
+      }
+      return {group,rolling};
+    }
+    for(let i=0;i<5;i++){
+      const model = makeOncomingCar(vehiclePaints[i]);
+      scene.add(model.group);
+      oncomingCars.push({ ...model, ahead:0, speed:0, lane:0 });
+    }
+    const carLanes = [-3.2,-1.1,1.1,3.2];
+    function resetOncomingCars(){
+      oncomingCars.forEach((car,i)=>{
+        car.ahead=54 + i*39 + i*i*2 + Math.random()*12;
+        car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
+        car.lane=carLanes[(i+Math.floor(Math.random()*4))%carLanes.length];
+        car.group.position.set(car.lane,0,-car.ahead);
+        car.group.visible=true;
+      });
+    }
+    function updateOncomingTraffic(dt){
+      let nearest=Infinity;
+      for(const car of oncomingCars){
+        car.ahead -= (speed + car.speed)*dt;
+        if(car.ahead < -16){
+          const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
+          car.ahead=farthest+37+Math.random()*26;
+          car.lane=carLanes[Math.floor(Math.random()*carLanes.length)];
+          car.speed=8+Math.random()*10;
+        }
+        car.group.position.set(car.lane,0,rider.position.z-car.ahead);
+        for(const tire of car.rolling)tire.rotation.x+=car.speed*dt/.30;
+        if(car.ahead > 0)nearest=Math.min(nearest,car.ahead);
+        if(car.ahead > -1.9 && car.ahead < 1.9 &&
+          Math.abs(car.lane-rider.position.x)<1.57) {
+          finish('traffic');return;
+        }
+      }
+      if(active && nearest<27){
+        warnEl.classList.add('visible');
+        warnEl.textContent='🚗 TRÁFICO DE FRENTE · '+Math.ceil(nearest)+' m';
+        if(nearest<15 && tilt<1.4)messageEl.textContent='¡ESQUIVA EL CARRO!';
+      }
+    }
+    resetOncomingCars();
+
     const keys = { gas: false };
     document.querySelectorAll('#controls [data-key]').forEach(btn => {
       const key = btn.dataset.key;
@@ -867,6 +938,9 @@
     const startBtn = document.getElementById('start');
     bestEl.textContent = record.toFixed(2) + ' s';
 
+    let gasHeldSeconds = 0;
+    let crashKind = '';
+    let crashFallProgress = 0;
     function reset() {
       document.body.classList.add('playing');
       active = true;
@@ -875,6 +949,10 @@
       elapsed = 0;
       distance = 0;
       wheelSpin = 0;
+      gasHeldSeconds = 0;
+      crashKind = '';
+      crashFallProgress = 0;
+      resetOncomingCars();
       lateralMotion = 0;setSteer(0);
       positionObstacles(0);
       warnEl.classList.remove('visible');
@@ -888,15 +966,22 @@
     }
     startBtn.addEventListener('click', reset);
 
-    function finish() {
+    function finish(reason = 'normal') {
+      if (!active) return;
+      crashKind = reason;
+      crashFallProgress = 0;
       document.body.classList.remove('playing');
       active = false;
+      keys.gas = false;
+      document.querySelectorAll('#controls .pressed').forEach(b=>b.classList.remove('pressed'));
       if (elapsed > record) {
         record = elapsed;
         localStorage.setItem('wheelie-best', record.toFixed(3));
         bestEl.textContent = record.toFixed(2) + ' s';
       }
-      messageEl.textContent = '¡INTENTO TERMINADO! ' + elapsed.toFixed(2) + ' s';
+      const reasonText = reason === 'backflip' ? '¡TE FUISTE DE ESPALDA!' :
+        reason === 'traffic' ? '¡CHOCASTE CONTRA UN CARRO!' : '¡INTENTO TERMINADO!';
+      messageEl.textContent = reasonText + '  ' + elapsed.toFixed(2) + ' s';
       startBtn.textContent = 'REINTENTAR';
       startBtn.hidden = false;
     }
@@ -936,14 +1021,18 @@
         rider.rotation.y=-lateralMotion*.14;
         rider.rotation.z=-lateralMotion*.045;
 
-        // Un solo botón: GAS aumenta velocidad Y levanta el frente.
-        // Aceleración, inclinación y descenso reaccionan suavemente.
-        // Los obstáculos aún pueden desestabilizar y provocar caída.
+        // Un solo GAS: acelerar aumenta progresivamente el ángulo.
+        // Si se mantiene presionado, el centro de masa se va hacia atrás:
+        // alcanza la zona roja y finalmente provoca un vuelco real en el juego.
+        // Soltarlo reduce el ángulo y evita la caída.
+        gasHeldSeconds = keys.gas ? Math.min(9, gasHeldSeconds + dt) :
+          Math.max(0, gasHeldSeconds - dt * 2.1);
         const powered = keys.gas && speed > 3.2;
-        const targetAngle = powered ? Math.min(1.35, 0.20 + (speed - 3.2) / 24 * 1.50) : 0;
-        const reactionSpeed = powered ? 0.90 : 1.35;
-        tilt = THREE.MathUtils.damp(tilt, targetAngle, reactionSpeed, dt);
-        tilt = Math.max(-0.035, tilt);
+        const risingPitch = Math.max(0, speed - 3.2) * .041;
+        const holdPitch = Math.max(0, gasHeldSeconds - 1.1) * .26;
+        const targetAngle = powered ? Math.min(1.82, .10 + risingPitch + holdPitch) : 0;
+        tilt = THREE.MathUtils.damp(tilt, targetAngle, powered ? 1.9 : 1.5, dt);
+        tilt = Math.max(-.035, tilt);
 
         const validWheelie = tilt > 0.16 && tilt < 1.48 && speed > 2;
         if (validWheelie) {
@@ -953,7 +1042,7 @@
         } else if (wasWheelie && tilt < 0.10) {
           finish();
         } else if (tilt >= 1.53) {
-          finish();
+          finish('backflip');
         } else if (speed < 2) {
           messageEl.textContent = '¡ACELERA PARA LEVANTAR!';
         } else {
@@ -971,6 +1060,7 @@
 
         rider.position.z = -distance;
         updateObstacleGameplay(dt);
+        updateOncomingTraffic(dt);
         rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
         vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
         rearPivot.rotation.x = tilt;
@@ -978,6 +1068,12 @@
         updateRoadWrap();
       }
 
+      // Animación breve tras pasarse del punto de equilibrio.
+      if(!active && crashKind==='backflip' && crashFallProgress < 1){
+        crashFallProgress=Math.min(1,crashFallProgress+dt*.8);
+        rearPivot.rotation.x=THREE.MathUtils.lerp(tilt,Math.PI*.93,crashFallProgress);
+        keepVehicleAboveRoad();
+      }
       camera.position.lerp(new THREE.Vector3(rider.position.x*.8, 2.8+rider.position.y*.45, rider.position.z + 6.2), 0.08);
       camera.lookAt(rider.position.x, 1.15+rider.position.y*.25, rider.position.z - 2.3);
       renderer.render(scene, camera);
