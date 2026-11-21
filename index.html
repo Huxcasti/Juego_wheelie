@@ -142,6 +142,18 @@
       #controls > .btn.gas{height:106px}
       #hint{bottom:140px}
     }
+
+    /* Interfaz de un solo botón de acción; el círculo es el control de dirección. */
+    #controls{justify-content:space-between;gap:18px;padding:0 clamp(16px,5vw,45px)}
+    #controls > .btn.gas {margin-left:auto;width:clamp(128px,37vw,190px);height:clamp(112px,34vw,142px);font-size:clamp(18px,4.5vw,23px);border-radius:28px}
+    #controls > .steering-control{width:clamp(116px,32vw,156px);height:clamp(116px,32vw,156px)}
+    #hint{bottom:clamp(156px,41vw,190px);max-width:440px;margin:auto;left:12px;right:12px}
+    @media(max-width:375px){
+      #controls{gap:12px;padding:0 10px}
+      #controls > .steering-control{width:108px;height:108px}
+      #controls > .btn.gas{width:clamp(128px,39vw,160px);height:116px}
+      #hint{bottom:150px}
+    }
 </style>
 </head>
 <body>
@@ -161,7 +173,7 @@
     <input id="modelFile" type="file" accept=".glb,model/gltf-binary" hidden>
   </div>
 
-  <div id="hint">Gira el manubrio para esquivar. Mantén GAS y controla el WHEELIE.</div>
+  <div id="hint">Mantén GAS para acelerar y levantar el FourTrax. Suelta para bajar las ruedas.</div>
 
   <div id="controls" aria-label="Controles táctiles del juego">
     <div id="steering" class="steering-control" role="slider" tabindex="0"
@@ -178,8 +190,7 @@
         </svg>
       </div>
     </div>
-    <button class="btn wheelie" data-key="lift" type="button" aria-label="Levantar ruedas delanteras">WHEELIE</button>
-    <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar">GAS</button>
+    <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar y hacer wheelie">GAS</button>
   </div>
 
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
@@ -444,6 +455,7 @@
     let vehicleLength = 1.85;
     let rearAxleZ = 0.75;
     let bodyClearance = 0.18;
+    let avatar = null;
 
     function clearVehicle() {
       while (vehicle.children.length) vehicle.remove(vehicle.children[0]);
@@ -462,6 +474,93 @@
       hub.castShadow = hub.receiveShadow = true;
       group.add(hub);
       return group;
+    }
+
+
+    // Conductor 3D estilizado inspirado en la fotografía del jugador:
+    // cabello negro corto con fade, camisa blanca de mangas cortas,
+    // pantalón oscuro, reloj blanco y manos sobre el manubrio.
+    // Creado con geometría; la fotografía privada no se sube a GitHub.
+    function createAvatar() {
+      const person = new THREE.Group();
+      person.name = 'Conductor personalizado';
+      const skin = mat(0xb78060, .82), skinShade = mat(0x9d674e, .9);
+      const hair = mat(0x1b1718, .96), fadedHair = mat(0x352b28, .95);
+      const shirt = mat(0xf1f0e8, .8), collar = mat(0xe5e4de, .88);
+      const pants = mat(0x202731, .95), shoes = mat(0x121519, .91);
+      const eyes = mat(0x36251c), eyeWhite=mat(0xf5eee4), black = mat(0x2b2221);
+      const watch = mat(0xf3f2eb,.5), watchFace = mat(0x393f48,.5);
+
+      const ellipsoid = (parent,material,pos,scales,seg=12) => {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(1,seg,9),material);
+        m.position.set(...pos);m.scale.set(...scales);m.castShadow=true;parent.add(m);return m;
+      };
+      const limb = (parent,a,b,rad,material) => {
+        const av=new THREE.Vector3(...a), bv=new THREE.Vector3(...b);
+        const dir=bv.clone().sub(av);
+        const m=new THREE.Mesh(new THREE.CylinderGeometry(rad*.91,rad,dir.length(),9),material);
+        m.position.copy(av).add(bv).multiplyScalar(.5);
+        m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());
+        m.castShadow=true;parent.add(m);return m;
+      };
+      const box=(parent,pos,size,material)=>{
+        const m=new THREE.Mesh(new THREE.BoxGeometry(...size),material);
+        m.position.set(...pos);m.castShadow=true;parent.add(m);return m;
+      };
+      // El modelo mira hacia el frente de la pista (-Z).
+      ellipsoid(person,pants,[0,1.10,.21],[.31,.19,.25]);
+      // Piernas sentadas, rodillas hacia adelante.
+      for (const side of [-1,1]) {
+        const hip=[side*.17,1.12,.18],knee=[side*.27,.89,-.29],ankle=[side*.34,.61,-.35];
+        limb(person,hip,knee,.145,pants);
+        ellipsoid(person,pants,knee,[.15,.13,.16]);
+        limb(person,knee,ankle,.105,pants);
+        ellipsoid(person,shoes,[side*.34,.56,-.45],[.15,.09,.24]);
+      }
+      // Torso ligeramente inclinado hacia el guía.
+      const chest = ellipsoid(person,shirt,[0,1.56,.07],[.34,.37,.20]);
+      chest.rotation.x=-.16;
+      box(person,[0,1.38,.20],[.45,.19,.22],shirt);
+      // Cuello y cuello abierto de camisa tipo polo.
+      limb(person,[0,1.80,.02],[0,1.93,-.015],.099,skin);
+      for(const side of [-1,1]){
+        const collarPiece=ellipsoid(person,collar,[side*.09,1.83,-.12],[.095,.075,.03]);
+        collarPiece.rotation.z=side*.33;
+        const shoulder=[side*.32,1.71,.045];
+        const elbow=[side*.42,1.43,-.29];
+        const wrist=[side*.51,1.42,-.69];
+        limb(person,shoulder,[side*.37,1.54,-.10],.137,shirt);
+        limb(person,[side*.37,1.54,-.10],elbow,.104,skin);
+        ellipsoid(person,skin,elbow,[.092,.096,.092]);
+        limb(person,elbow,wrist,.082,skin);
+        ellipsoid(person,skin,[side*.51,1.42,-.70],[.108,.072,.105]);
+        if(side===-1){
+          const wristWatch=ellipsoid(person,watch,[side*.495,1.424,-.60],[.10,.096,.065]);
+          ellipsoid(person,watchFace,[side*.495,1.49,-.60],[.067,.018,.045]);
+        }
+      }
+      // Forma de la cara y peinado corto de lados rebajados (sin textura fotográfica).
+      const head=ellipsoid(person,skin,[0,2.085,-.02],[.205,.244,.19],20);
+      ellipsoid(person,skin,[-.198,2.07,-.025],[.047,.075,.041]);
+      ellipsoid(person,skin,[ .198,2.07,-.025],[.047,.075,.041]);
+      ellipsoid(person,hair,[0,2.265,-.014],[.209,.074,.191],20);
+      ellipsoid(person,fadedHair,[-.172,2.187,.007],[.033,.06,.14]);
+      ellipsoid(person,fadedHair,[.172,2.187,.007],[.033,.06,.14]);
+      // Rasgos visibles en cámara frontal, discretos y estilizados.
+      for(const side of [-1,1]){
+        ellipsoid(person,eyeWhite,[side*.083,2.103,-.190],[.046,.027,.011]);
+        ellipsoid(person,eyes,[side*.083,2.102,-.201],[.022,.023,.012]);
+        const brow=box(person,[side*.083,2.151,-.195],[.085,.014,.015],hair);
+        brow.rotation.z=side*.10;
+      }
+      ellipsoid(person,skinShade,[0,2.03,-.211],[.036,.055,.036]);
+      ellipsoid(person,black,[0,1.967,-.189],[.069,.012,.009]);
+      person.position.set(0,0.04,.14);
+      return person;
+    }
+    function attachAvatar(){
+      if(!avatar)avatar=createAvatar();
+      vehicle.add(avatar);
     }
 
     function buildFallbackATV() {
@@ -499,6 +598,7 @@
         vehicle.add(w);
         importedWheelGroups.push(w);
       }
+      attachAvatar();
       importedModel = null;
       vehicleLength = 1.7;
       rearAxleZ = 0.72;
@@ -619,6 +719,7 @@
       importedModel = sceneModel;
       vehicle.add(importedModel);
       normalizeImportedModel(importedModel);
+      attachAvatar();
       modelLoaded = true;
       modelStatus.textContent = '✓ HONDA FOURTRAX 3D CARGADO';
     }
@@ -722,7 +823,7 @@
     addEventListener('keydown',e=>{if(e.code==='KeyA')keyboardSteer=-1;if(e.code==='KeyD')keyboardSteer=1;});
     addEventListener('keyup',e=>{if(e.code==='KeyA'||e.code==='KeyD')keyboardSteer=0;});
 
-    const keys = { gas: false, lift: false };
+    const keys = { gas: false };
     document.querySelectorAll('#controls [data-key]').forEach(btn => {
       const key = btn.dataset.key;
       const set = value => { keys[key] = value; btn.classList.toggle('pressed', value); };
@@ -741,11 +842,11 @@
     document.addEventListener('selectstart', e => e.preventDefault());
     document.addEventListener('dragstart', e => e.preventDefault());
     window.addEventListener('blur', () => {
-      keys.gas = false; keys.lift = false;
+      keys.gas = false;
       document.querySelectorAll('#controls .pressed').forEach(b => b.classList.remove('pressed'));
     });
 
-    const keymap = { ArrowUp: 'gas', Space: 'lift', KeyW: 'gas' };
+    const keymap = { ArrowUp: 'gas', Space: 'gas', KeyW: 'gas' };
     addEventListener('keydown', e => { if (keymap[e.code]) { keys[keymap[e.code]] = true; e.preventDefault(); } });
     addEventListener('keyup', e => { if (keymap[e.code]) keys[keymap[e.code]] = false; });
 
@@ -835,13 +936,14 @@
         rider.rotation.y=-lateralMotion*.14;
         rider.rotation.z=-lateralMotion*.045;
 
-        // Con dos botones se controla el ángulo pulsando y soltando WHEELIE.
-        // Más lento que antes para poder hacer récords sin ADELANTE/ATRÁS.
-        // El jugador puede hacer wheelies altos manteniendo WHEELIE.
-        // Suelta el botón para bajar y mantener el punto de equilibrio.
-        const liftForce = keys.lift && speed > 2.8 ? 1.03 : 0;
-        tilt += ((liftForce - 0.31 - Math.sin(tilt) * 0.13) * dt);
-        tilt = Math.max(-0.05, tilt);
+        // Un solo botón: GAS aumenta velocidad Y levanta el frente.
+        // Aceleración, inclinación y descenso reaccionan suavemente.
+        // Los obstáculos aún pueden desestabilizar y provocar caída.
+        const powered = keys.gas && speed > 3.2;
+        const targetAngle = powered ? Math.min(1.35, 0.20 + (speed - 3.2) / 24 * 1.50) : 0;
+        const reactionSpeed = powered ? 0.90 : 1.35;
+        tilt = THREE.MathUtils.damp(tilt, targetAngle, reactionSpeed, dt);
+        tilt = Math.max(-0.035, tilt);
 
         const validWheelie = tilt > 0.16 && tilt < 1.48 && speed > 2;
         if (validWheelie) {
@@ -855,7 +957,7 @@
         } else if (speed < 2) {
           messageEl.textContent = '¡ACELERA PARA LEVANTAR!';
         } else {
-          messageEl.textContent = '¡PRESIONA WHEELIE!';
+          messageEl.textContent = '¡MANTÉN GAS PARA LEVANTAR!';
         }
 
         wheelSpin = (wheelSpin + speed * dt / 0.33) % (Math.PI * 2);
