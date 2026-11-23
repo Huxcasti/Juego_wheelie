@@ -385,7 +385,15 @@
     const treeLeafGeo=new THREE.IcosahedronGeometry(1.55,1);
     const leafA=mat(0x2f9e31),leafB=mat(0x57b937),leafC=mat(0x82d13e),trunkMat=mat(0x715039);
     const rockMat=mat(0xb17d58),rockShade=mat(0xa26747),poleMat=mat(0x778a94);
-    function registerScenery(group,z){group.userData.baseZ=z;scene.add(group);landscape.push(group);}
+    function registerScenery(group,z){
+      // Posicionar desde el primer fotograma, antes de que pulse COMENZAR.
+      // Antes todos los árboles y postes quedaban amontonados en z=0,
+      // fuera del campo visual de la cámara del iPhone.
+      group.userData.baseZ=z;
+      group.position.z=z;
+      scene.add(group);
+      landscape.push(group);
+    }
     for(let i=0;i<44;i++)for(const side of [-1,1]){
       const group=new THREE.Group(),z=-150+i*7+side*1.3;
       group.position.x=side*(9.0+(i%4)*1.18);
@@ -2061,6 +2069,9 @@
       camera.position.set(.70,3.50,8.30);
       camera.lookAt(.48,1.23,-7.20);
       camera.updateMatrixWorld(true);
+      // Recolocar árboles, farolas, líneas y terreno antes de la
+      // primera imagen del nuevo intento, incluso si aún no aceleró.
+      updateRoadWrap();
       last=performance.now();
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
@@ -2172,6 +2183,10 @@
       );
       rider.updateWorldMatrix(true,true);
     }
+
+    // Mostrar el paisaje completo también en el menú inicial.
+    // No esperar a que el jugador acelere para organizar la carretera.
+    updateRoadWrap();
 
     function frame(now) {
       requestAnimationFrame(frame);
