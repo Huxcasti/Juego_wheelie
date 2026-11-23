@@ -266,6 +266,13 @@
     @media(max-height:450px){#levelResultCard{padding:12px 18px}#levelResultCard h2{margin-bottom:4px}
       #levelStars{font-size:39px;margin:3px 0 6px}#levelResultHint{margin-bottom:8px}
       #levelRetry{padding:8px 17px}#levelProgress{top:105px}}
+    /* Reconocimiento del autor del modelo 3D usado en el autobús. */
+    #bus3DCredit{position:fixed;bottom:max(5px,env(safe-area-inset-bottom));
+      left:50%;transform:translateX(-50%);font-size:9px;white-space:nowrap;
+      color:#d8e7ee;background:#0616279e;padding:2px 8px;border-radius:8px;
+      z-index:15;text-decoration:none}
+    #bus3DCredit:focus-visible{outline:2px solid #fff}
+    body.playing #bus3DCredit{display:none}
 </style>
 </head>
 <body>
@@ -280,6 +287,10 @@
   <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/24</span></div>
   <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 336 m</div>
   <div id="coinPopLayer" aria-hidden="true"></div>
+  <a id="bus3DCredit" href="https://sketchfab.com/3d-models/autobus-abco-852a63f852584448a49d643ae944506e"
+     target="_blank" rel="noopener noreferrer" title="Modelo Autobus ABCO (CC BY 4.0)">
+    Autobús ABCO 3D · BgirlKittyEmo · CC BY 4.0
+  </a>
   <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
   <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
@@ -1448,6 +1459,76 @@
     // Los carros continúan pasando cerca, pero nunca por los carriles
     // interiores reservados para recoger chapitas en este mapa.
     const carLanes = [-3.45,3.45];
+    // "Autobus ABCO" por BgirlKittyEmo, CC BY 4.0 (Sketchfab).
+    // Modelo GLB original aportado por el usuario; versión optimizada
+    // con el interior de menor detalle y servida comprimida en GitHub.
+    // El autobús rosa provisional sigue disponible como respaldo.
+    async function loadABCOBus(){
+      try{
+        if(typeof DecompressionStream!=='function'){
+          throw new Error('Este navegador no permite descomprimir GLB en streaming');
+        }
+        const response=await fetch('./assets/autobus_abco.glb.gz');
+        if(!response.ok)throw new Error('HTTP '+response.status+' cargando autobús');
+        const stream=response.body;
+        if(!stream)throw new Error('Archivo del autobús sin flujo');
+        const data=await new Response(
+          stream.pipeThrough(new DecompressionStream('gzip'))
+        ).arrayBuffer();
+        // Usar el mismo GLTFLoader que carga el Yamaha y el conductor.
+        const gltf=await new Promise((resolve,reject)=>{
+          loader.parse(data,'',resolve,reject);
+        });
+        const model=gltf.scene;
+        model.updateWorldMatrix(true,true);
+        const bounds=new THREE.Box3().setFromObject(model);
+        const size=new THREE.Vector3();
+        bounds.getSize(size);
+        if(!Number.isFinite(size.x) || size.x<.2 || size.z<1){
+          throw new Error('El modelo de autobús tiene medidas inválidas');
+        }
+        // El GLB apunta hacia +Z, igual que el tráfico de frente.
+        // Mantener las proporciones de un autobús real, no aplastarlo.
+        const factor=2.46/size.x;
+        model.scale.multiplyScalar(factor);
+        model.updateWorldMatrix(true,true);
+        bounds.setFromObject(model);
+        const center=bounds.getCenter(new THREE.Vector3());
+        const dimensions=bounds.getSize(new THREE.Vector3());
+        model.position.x-=center.x;
+        model.position.y+=.025-bounds.min.y;
+        model.position.z-=center.z;
+        model.updateWorldMatrix(true,true);
+        model.traverse(obj=>{
+          if(obj.isMesh){
+            // 50 mil triángulos: solo la carrocería produce sombra para
+            // no saturar el GPU móvil con docenas de mapas de sombras.
+            obj.castShadow=/bodi/i.test(obj.name);
+            obj.receiveShadow=/bodi/i.test(obj.name);
+          }
+        });
+        const existing=oncomingCars.find(car=>car.isBus);
+        if(!existing)return;
+        const group=new THREE.Group();
+        group.name='Autobús ABCO 3D';
+        group.position.copy(existing.group.position);
+        group.rotation.copy(existing.group.rotation);
+        group.add(model);
+        scene.remove(existing.group);
+        scene.add(group);
+        existing.group=group;
+        existing.rolling=[]; // Las gomas pertenecen a la malla real.
+        existing.collisionHalfLength=dimensions.z*.5+.24;
+        existing.collisionHalfWidth=dimensions.x*.5+.38;
+        existing.modelLoaded=true;
+        console.info('Autobús ABCO cargado: ',dimensions.x.toFixed(2),
+          'm ancho, ',dimensions.z.toFixed(2),'m largo');
+      }catch(err){
+        // Conservar el autobús provisional en lugar de bloquear el juego.
+        console.warn('Se mantiene el autobús de respaldo:',err);
+      }
+    }
+
     function resetOncomingCars(){
       oncomingCars.forEach((car,i)=>{
         car.ahead=i===5 ? 214+Math.random()*18 :
@@ -1473,8 +1554,10 @@
         for(const tire of car.rolling)
           tire.rotation.x+=car.speed*dt/(car.wheelRadius||.30);
         if(car.ahead > 0)nearest=Math.min(nearest,car.ahead);
-        const length=car.isBus?3.0:car.isTruck?2.75:1.9;
-        const width=car.isBus?1.85:car.isTruck?1.87:1.57;
+        const length=car.collisionHalfLength ??
+          (car.isBus?3.0:car.isTruck?2.75:1.9);
+        const width=car.collisionHalfWidth ??
+          (car.isBus?1.85:car.isTruck?1.87:1.57);
         if(car.ahead>-length && car.ahead<length &&
           Math.abs(car.lane-rider.position.x)<width) {
           finish('traffic');return;
@@ -1487,6 +1570,8 @@
       }
     }
     resetOncomingCars();
+    // Carga no bloqueante: el juego puede comenzar mientras llega el GLB.
+    loadABCOBus();
 
 
     // Rival rojo. Usa el modelo provisional hasta que cargue el Yamaha
@@ -1659,11 +1744,13 @@
         const ahead=botZ-car.group.position.z;
         if(ahead < -4 || ahead > 125)continue;
         const relativeSpeed=Math.max(5,speed)+car.speed;
-        const encounter=Math.max(0,ahead-1.5)/relativeSpeed;
+        const encounter=Math.max(0,ahead-
+          (car.collisionHalfLength||1.5))/relativeSpeed;
         if(encounter>4.3)continue;
         const predicted=atTime(encounter);
         const clearance=Math.abs(predicted-car.lane);
-        const safeWidth=car.isBus?1.95:car.isTruck?1.94:1.71;
+        const safeWidth=car.collisionHalfWidth ??
+          (car.isBus?1.95:car.isTruck?1.94:1.71);
         // Penalización alta por colisión prevista en el momento del cruce.
         if(clearance<safeWidth){
           risk+=1100+(4.3-encounter)*110;
