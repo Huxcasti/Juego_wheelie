@@ -242,6 +242,30 @@
     @media(prefers-reduced-motion:reduce){
       .coin-points-popup{animation-duration:.28s}
     }
+
+    /* Nivel 1: progreso y pantalla de calificación por chapitas. */
+    #levelProgress{position:fixed;top:clamp(116px,15vw,152px);right:max(12px,env(safe-area-inset-right));z-index:29;
+      pointer-events:none;background:#06162bdc;border:1px solid #8ad7ff77;border-radius:14px;
+      padding:5px 10px;font-size:clamp(10px,1.45vw,13px);font-weight:900;color:#e9f9ff;
+      text-shadow:0 2px 2px #0008;white-space:nowrap}
+    #coinBadge #coinGoal{font-size:.75em;color:#fff0a6}
+    #levelResults{display:none;position:fixed;inset:0;z-index:70;align-items:center;justify-content:center;
+      background:linear-gradient(160deg,#041021e8,#0b2242e9);padding:16px;overflow:auto}
+    body.level-complete #levelResults{display:flex}
+    #levelResultCard{width:min(90vw,440px);max-height:calc(100dvh - 28px);overflow-y:auto;
+      border:2px solid #ffdb6b;border-radius:22px;background:linear-gradient(155deg,#17416b,#061325);
+      box-shadow:0 0 32px #f8b83055,0 15px 40px #000b;text-align:center;padding:clamp(14px,3vw,28px)}
+    #levelResultCard h2{font-size:clamp(20px,4vw,35px);line-height:1.12;margin:0 0 10px;font-weight:1000}
+    #levelStars{color:#ffdd35;font-size:clamp(42px,8vw,72px);line-height:1;letter-spacing:.03em;
+      text-shadow:0 0 16px #ffb2008a,0 3px 2px #684000;margin:8px 0 13px}
+    #levelCoinResult{font-size:clamp(16px,2.5vw,23px);font-weight:900;color:#fff4b2;margin:0 0 7px}
+    #levelResultHint{font-size:clamp(12px,1.9vw,15px);color:#d3e9ff;line-height:1.35;margin:0 0 13px}
+    #levelRetry{border:2px solid #e1ffc7;border-radius:16px;padding:12px 23px;
+      background:linear-gradient(#a4ff4a,#1bbe28);color:#092b11;font-weight:1000;
+      font-size:clamp(15px,2.8vw,22px);box-shadow:0 5px 0 #0a6f17;touch-action:manipulation}
+    @media(max-height:450px){#levelResultCard{padding:12px 18px}#levelResultCard h2{margin-bottom:4px}
+      #levelStars{font-size:39px;margin:3px 0 6px}#levelResultHint{margin-bottom:8px}
+      #levelRetry{padding:8px 17px}#levelProgress{top:105px}}
 </style>
 </head>
 <body>
@@ -253,13 +277,23 @@
   </div>
 
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
-  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span></div>
+  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/24</span></div>
+  <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 336 m</div>
   <div id="coinPopLayer" aria-hidden="true"></div>
   <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
   <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
   <div id="message"></div>
   <button id="start">COMENZAR</button>
+  <section id="levelResults" role="dialog" aria-modal="true" aria-labelledby="levelResultTitle">
+    <div id="levelResultCard">
+      <h2 id="levelResultTitle">¡MAPA 1 COMPLETADO!</h2>
+      <div id="levelStars" aria-label="Estrellas obtenidas">☆☆☆</div>
+      <p id="levelCoinResult">0 / 24 chapitas</p>
+      <p id="levelResultHint">Recoge todas las chapitas para conseguir 3 estrellas.</p>
+      <button id="levelRetry" type="button">JUGAR OTRA VEZ</button>
+    </div>
+  </section>
 
   <div id="modelPicker">
     <button id="pickModel" type="button">📂 CARGAR FOURTRACK 3D</button>
@@ -430,6 +464,11 @@
     /* Badenes, lomos y conos en el recorrido: se reciclan por delante del jugador. */
     const obstacles = [];
     const trackLength = 310;
+    // El primer mapa termina en una meta real. Hay exactamente 24 chapitas.
+    const LEVEL_LENGTH = 336;
+    const LEVEL_FIRST_COIN = 24;
+    const LEVEL_LAST_COIN = 300;
+    const LEVEL_TOTAL_COINS = 24;
     const warnEl = document.getElementById('roadAlert');
     // Altura de la superficie bajo las ruedas; cero en asfalto plano.
     let surfaceContactHeight = 0;
@@ -483,6 +522,28 @@
     addCones(-192,1);
     addHump(-232,'badén',.28,3.5);
     addHump(-282,'reductor',.22,1.7);
+
+    // Meta visible, fuera de la carretera salvo la franja cuadriculada.
+    const finishGate=new THREE.Group();
+    finishGate.position.z=-LEVEL_LENGTH;
+    const finishWhite=new THREE.MeshBasicMaterial({color:0xf7f9ff});
+    const finishDark=new THREE.MeshBasicMaterial({color:0x202637});
+    const finishGold=new THREE.MeshStandardMaterial({color:0xffd12b,metalness:.24,roughness:.42});
+    for(let row=0;row<2;row++)for(let column=0;column<12;column++){
+      const tile=new THREE.Mesh(new THREE.BoxGeometry(.90,.026,.56),
+        (row+column)%2?finishWhite:finishDark);
+      tile.position.set(-4.95+.90*column,.06,-.28+row*.56);
+      finishGate.add(tile);
+    }
+    for(const side of [-1,1]){
+      const pole=new THREE.Mesh(new THREE.BoxGeometry(.19,4.8,.22),finishGold);
+      pole.position.set(side*6.15,2.40,0);
+      finishGate.add(pole);
+    }
+    const finishBar=new THREE.Mesh(new THREE.BoxGeometry(12.46,.38,.35),finishGold);
+    finishBar.position.set(0,4.75,0);
+    finishGate.add(finishBar);
+    scene.add(finishGate);
 
     function positionObstacles(traveled){
       for(const o of obstacles){
@@ -1259,12 +1320,14 @@
       scene.add(model.group);
       oncomingCars.push({ ...model, ahead:0, speed:0, lane:0 });
     }
-    const carLanes = [-3.2,-1.1,1.1,3.2];
+    // Los carros continúan pasando cerca, pero nunca por los carriles
+    // interiores reservados para recoger chapitas en este mapa.
+    const carLanes = [-3.45,3.45];
     function resetOncomingCars(){
       oncomingCars.forEach((car,i)=>{
         car.ahead=i===4 ? 101+Math.random()*22 : 54 + i*39 + i*i*2 + Math.random()*12;
         car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
-        car.lane=carLanes[(i+Math.floor(Math.random()*4))%carLanes.length];
+        car.lane=carLanes[(i+Math.floor(Math.random()*carLanes.length))%carLanes.length];
         car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=true;
       });
@@ -1804,7 +1867,7 @@
       }catch(err){console.info('Sonido de chapita omitido',err);}
     }
     let coinCount=0;
-    let nextCoinAt=24;
+    let nextCoinAt=LEVEL_FIRST_COIN;
 
     function newCoinBatch(){
       const geometries=[coinFaceGeo,coinRingGeo,coinStarGeo];
@@ -1850,7 +1913,8 @@
       if(!batch || batch.count>=COIN_BATCH_SIZE)batch=newCoinBatch();
       const i=coins.length;
       const coin={
-        at,lane:i%7<4?-.92:1.15,
+        // Cambios de lado por grupos: tiempo real para maniobrar.
+        at,lane:Math.floor(i/6)%2===0?-1.02:1.02,
         batch,slot:batch.count,collected:false,pickupTime:null
       };
       batch.count++;
@@ -1860,7 +1924,7 @@
       setCoinTransform(coin,0,0);
     }
     function ensureCoinsAhead(traveled){
-      const limit=traveled+COIN_LOOKAHEAD;
+      const limit=Math.min(traveled+COIN_LOOKAHEAD,LEVEL_LAST_COIN);
       while(nextCoinAt<=limit){
         spawnCoin(nextCoinAt);
         nextCoinAt+=COIN_SPACING;
@@ -1877,7 +1941,7 @@
       coinCount=0;
       coinCountEl.textContent='0';
       resetCoinSparkles();
-      nextCoinAt=24;
+      nextCoinAt=LEVEL_FIRST_COIN;
       ensureCoinsAhead(0);
     }
     function updateCoins(dt){
@@ -1904,7 +1968,7 @@
         }
         if(active && !paused &&
           Math.abs(ahead)<1.6 &&
-          Math.abs(rider.position.x-coin.lane)<1.05){
+          Math.abs(rider.position.x-coin.lane)<.72){
           coin.collected=true;
           coin.pickupTime=0;
           coinCount++;
@@ -2008,6 +2072,25 @@
     const POINTS_PER_SECOND = 40;
     function formatScore(value) { return Math.floor(value).toLocaleString('es-PR'); }
 
+    const mapProgressEl=document.getElementById('levelProgress');
+    const coinGoalEl=document.getElementById('coinGoal');
+    const resultsStarsEl=document.getElementById('levelStars');
+    const resultsCoinsEl=document.getElementById('levelCoinResult');
+    const resultsHintEl=document.getElementById('levelResultHint');
+    coinGoalEl.textContent='/'+LEVEL_TOTAL_COINS;
+    function starsForCoins(caught){
+      if(caught>=LEVEL_TOTAL_COINS)return 3;
+      if(caught/LEVEL_TOTAL_COINS>=.70)return 2;
+      return 1;
+    }
+    let progressBucket=-1;
+    function updateLevelProgress(){
+      const bucket=Math.floor(distance/5);
+      if(bucket===progressBucket)return;
+      progressBucket=bucket;
+      mapProgressEl.textContent='MAPA 1 · '+
+        Math.min(LEVEL_LENGTH,Math.floor(distance))+' / '+LEVEL_LENGTH+' m';
+    }
     const timeEl = document.getElementById('time');
     const bestEl = document.getElementById('best');
     const angleEl = document.getElementById('angle');
@@ -2029,7 +2112,9 @@
         messageEl.textContent='PREPARANDO EL YAMAHA RAPTOR…';
         return;
       }
+      document.body.classList.remove('level-complete');
       document.body.classList.add('playing');
+      progressBucket=-1;
       active = true;
       paused=false;document.body.classList.remove('paused');pauseBtn.textContent='Ⅱ';
       resetCoins();rivalClock=0;resetRivalAI();
@@ -2072,11 +2157,15 @@
       // Recolocar árboles, farolas, líneas y terreno antes de la
       // primera imagen del nuevo intento, incluso si aún no aceleró.
       updateRoadWrap();
+      updateLevelProgress();
       last=performance.now();
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
     }
     startBtn.addEventListener('click',()=>{unlockCoinAudio();reset();});
+    document.getElementById('levelRetry').addEventListener('click',()=>{
+      unlockCoinAudio();reset();
+    });
 
     function finish(reason = 'normal') {
       if (!active) return;
@@ -2104,6 +2193,22 @@
       messageEl.textContent = reasonText + ' · ' + elapsed.toFixed(2) + ' s · ' + formatScore(score) + ' PTS';
       startBtn.textContent = 'REINTENTAR';
       startBtn.hidden = false;
+      if(reason==='level'){
+        const stars=starsForCoins(coinCount);
+        const bestStars=Math.max(stars,
+          Number(localStorage.getItem('wheelie-level-1-best-stars')||0));
+        localStorage.setItem('wheelie-level-1-best-stars',String(bestStars));
+        resultsStarsEl.textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
+        resultsStarsEl.setAttribute('aria-label',stars+' de 3 estrellas');
+        resultsCoinsEl.textContent='🟡 '+coinCount+' / '+LEVEL_TOTAL_COINS+' chapitas';
+        resultsHintEl.textContent=stars===3?
+          '¡Perfecto! Recogiste todas las chapitas. Mejor nivel: 3 estrellas.' :
+          'Mejor resultado: '+bestStars+
+          ' estrellas. Para conseguir 3 necesitas todas las chapitas.';
+        messageEl.textContent='';
+        document.body.classList.add('level-complete');
+        startBtn.hidden=true;
+      }
     }
 
     function updateRoadWrap() {
@@ -2195,7 +2300,8 @@
 
       if (active && !paused) {
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
-        distance += speed * dt;
+        distance = Math.min(LEVEL_LENGTH,distance+speed*dt);
+        updateLevelProgress();
         const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
         lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,5,dt);
         // Velocidad lateral amortiguada para una respuesta progresiva.
@@ -2231,7 +2337,17 @@
           messageEl.textContent = multiplier === 5 ? '¡WHEELIE EXTREMO! x5' :
             multiplier >= 3 ? '¡SIGUE ASÍ! x' + multiplier : '¡MANTÉN EL EQUILIBRIO!';
         } else if (wasWheelie && tilt < 0.10) {
-          finish();
+          // Aterrizar sin volcarse no termina el mapa. Se puede seguir
+          // buscando chapitas y volver a levantar el FourTrax.
+          if(elapsed>record){
+            record=elapsed;
+            localStorage.setItem('wheelie-best',record.toFixed(3));
+            bestEl.textContent=record.toFixed(2)+' s';
+          }
+          wasWheelie=false;
+          elapsed=0;
+          timeEl.textContent='0.00 s';
+          messageEl.textContent='¡ATERRIZAJE SEGURO!';
         } else if (tilt >= 1.53) {
           finish('backflip');
         } else if (speed < 2) {
@@ -2269,7 +2385,13 @@
         updateContactShadows();
         updateRoadWrap();
       }
-      if(!paused){if(!active){updateAvatarAnimation(dt);animateCustomRider(dt);updateContactShadows();}updateRival(dt);updateCoins(dt);}
+      if(!paused){
+        if(!active){updateAvatarAnimation(dt);animateCustomRider(dt);updateContactShadows();}
+        updateRival(dt);
+        updateCoins(dt);
+        // Contar primero la última chapita y después mostrar las estrellas.
+        if(active && distance>=LEVEL_LENGTH)finish('level');
+      }
 
       // Animación breve tras pasarse del punto de equilibrio.
       if(!active && crashKind==='backflip' && crashFallProgress < 1){
