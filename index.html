@@ -210,6 +210,14 @@
       #controls > .steering-control{width:clamp(105px,31vw,152px);height:clamp(105px,31vw,152px)}
       #controls > .btn.gas{width:clamp(112px,33vw,170px);height:95px}
     }
+
+    /* Puntuación por ángulo del wheelie: más riesgo = más puntos. */
+    #hud .score-pill{border-color:#ffcf4b;box-shadow:0 2px 0 #fff1af inset,0 0 14px #ffd12f5b,0 7px 16px #0008}
+    #hud .score-pill em{display:block;font-style:normal;font-weight:950;font-size:clamp(8px,1.15vw,13px);
+      color:#9effb0;line-height:1.05;margin-top:2px;white-space:nowrap;text-shadow:0 2px 3px #000}
+    #hud .score-pill.extreme{border-color:#ff6b26;box-shadow:0 0 18px #ff9e22b8,0 3px 12px #000a}
+    #hud .score-pill.extreme em{color:#ffbe65}
+    @media(max-height:440px){#hud .score-pill em{font-size:8px;margin-top:0}}
 </style>
 </head>
 <body>
@@ -217,6 +225,7 @@
     <div class="pill"><small>WHEELIE ACTUAL</small><span id="time">0.00 s</span></div>
     <div class="pill"><small>RÉCORD PERSONAL</small><span id="best">0.00 s</span></div>
     <div class="pill"><small>ÁNGULO</small><span id="angle">0°</span></div>
+    <div class="pill score-pill"><small>🏆 PUNTOS</small><span id="score">0</span><em id="scoreMultiplier">x1 · 40 pts/s</em></div>
   </div>
 
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
@@ -1117,10 +1126,26 @@
     let wasWheelie = false;
     let last = performance.now();
     let record = Number(localStorage.getItem('wheelie-best') || 0);
+    let score = 0;
+    let bestScore = Number(localStorage.getItem('wheelie-best-score') || 0);
+    // Cuanto más inclinado y estable, mayor recompensa. Sin puntos al caerse.
+    // Se calcula según el ángulo real, sin depender de la cantidad de fotogramas.
+    function wheelieMultiplier(degrees) {
+      if (degrees >= 75) return 5;
+      if (degrees >= 60) return 4;
+      if (degrees >= 45) return 3;
+      if (degrees >= 30) return 2;
+      return 1;
+    }
+    const POINTS_PER_SECOND = 40;
+    function formatScore(value) { return Math.floor(value).toLocaleString('es-PR'); }
 
     const timeEl = document.getElementById('time');
     const bestEl = document.getElementById('best');
     const angleEl = document.getElementById('angle');
+    const scoreEl = document.getElementById('score');
+    const multiplierEl = document.getElementById('scoreMultiplier');
+    const scorePill = document.querySelector('.score-pill');
     const messageEl = document.getElementById('message');
     const startBtn = document.getElementById('start');
     bestEl.textContent = record.toFixed(2) + ' s';
@@ -1136,6 +1161,10 @@
       speed = 0;
       tilt = 0;
       elapsed = 0;
+      score = 0;
+      scoreEl.textContent = '0';
+      multiplierEl.textContent = 'x1 · 40 pts/s';
+      scorePill.classList.remove('extreme');
       distance = 0;
       wheelSpin = 0;
       gasHeldSeconds = 0;
@@ -1169,9 +1198,15 @@
         localStorage.setItem('wheelie-best', record.toFixed(3));
         bestEl.textContent = record.toFixed(2) + ' s';
       }
+      if (score > bestScore) {
+        bestScore = Math.floor(score);
+        localStorage.setItem('wheelie-best-score', String(bestScore));
+      }
+      multiplierEl.textContent = 'RÉCORD: ' + formatScore(bestScore);
+      scorePill.classList.remove('extreme');
       const reasonText = reason === 'backflip' ? '¡TE FUISTE DE ESPALDA!' :
         reason === 'traffic' ? '¡CHOCASTE CONTRA UN CARRO!' : '¡INTENTO TERMINADO!';
-      messageEl.textContent = reasonText + '  ' + elapsed.toFixed(2) + ' s';
+      messageEl.textContent = reasonText + ' · ' + elapsed.toFixed(2) + ' s · ' + formatScore(score) + ' PTS';
       startBtn.textContent = 'REINTENTAR';
       startBtn.hidden = false;
     }
@@ -1229,8 +1264,15 @@
         const validWheelie = tilt > 0.16 && tilt < 1.48 && speed > 2;
         if (validWheelie) {
           elapsed += dt;
+          const degrees = tilt * 180 / Math.PI;
+          const multiplier = wheelieMultiplier(degrees);
+          score += POINTS_PER_SECOND * multiplier * dt;
+          scoreEl.textContent = formatScore(score);
+          multiplierEl.textContent = 'x' + multiplier + ' · ' + (POINTS_PER_SECOND * multiplier) + ' pts/s';
+          scorePill.classList.toggle('extreme', multiplier >= 4);
           wasWheelie = true;
-          messageEl.textContent = '¡MANTÉN EL EQUILIBRIO!';
+          messageEl.textContent = multiplier === 5 ? '¡WHEELIE EXTREMO! x5' :
+            multiplier >= 3 ? '¡SIGUE ASÍ! x' + multiplier : '¡MANTÉN EL EQUILIBRIO!';
         } else if (wasWheelie && tilt < 0.10) {
           finish();
         } else if (tilt >= 1.53) {
@@ -1239,6 +1281,10 @@
           messageEl.textContent = '¡ACELERA PARA LEVANTAR!';
         } else {
           messageEl.textContent = '¡MANTÉN GAS PARA LEVANTAR!';
+        }
+        if (!validWheelie) {
+          multiplierEl.textContent = 'LEVANTA PARA PUNTUAR';
+          scorePill.classList.remove('extreme');
         }
 
         wheelSpin = (wheelSpin + speed * dt / 0.33) % (Math.PI * 2);
