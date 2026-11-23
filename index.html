@@ -1121,50 +1121,138 @@
       for(const w of rival.wheels)w.rotation.x-=dt*Math.max(speed,5)/.43;
     }
 
-    // Monedas 3D coleccionables: son puntos del juego, no dinero real.
-    const coinGold=new THREE.MeshStandardMaterial({color:0xffbd16,metalness:.62,roughness:.22,emissive:0xe08f00,emissiveIntensity:.27});
+    // Chapitas: cada una permanece anclada a su posición absoluta de la
+    // carretera si el jugador la esquiva. Solo desaparece si se recoge.
+    // InstancedMesh mantiene el rendimiento incluso en recorridos largos.
+    const COIN_POINTS = 25;
+    const COIN_SPACING = 12;
+    const COIN_BATCH_SIZE = 128;
+    const COIN_LOOKAHEAD = 230;
+    const coinGold=new THREE.MeshStandardMaterial({
+      color:0xffbd16,metalness:.62,roughness:.22,
+      emissive:0xe08f00,emissiveIntensity:.27
+    });
     const coinRim=new THREE.MeshBasicMaterial({color:0xffec70});
     const starShape=new THREE.Shape();
     for(let k=0;k<10;k++){
-      const a=-Math.PI/2+k*Math.PI/5,r=k%2?.18:.37,x=Math.cos(a)*r,y=Math.sin(a)*r;
+      const a=-Math.PI/2+k*Math.PI/5,r=k%2?.18:.37;
+      const x=Math.cos(a)*r,y=Math.sin(a)*r;
       if(k===0)starShape.moveTo(x,y);else starShape.lineTo(x,y);
     }
     starShape.closePath();
     const coinFaceGeo=new THREE.CylinderGeometry(.51,.51,.12,24);
+    coinFaceGeo.rotateX(Math.PI/2);
     const coinRingGeo=new THREE.TorusGeometry(.43,.065,8,24);
+    coinRingGeo.translate(0,0,.079);
     const coinStarGeo=new THREE.ShapeGeometry(starShape);
+    coinStarGeo.translate(0,0,.082);
+
+    const coinBatches=[];
     const coins=[];
+    const coinDummy=new THREE.Object3D();
     const coinCountEl=document.getElementById('coinCount');
     let coinCount=0;
-    for(let i=0;i<18;i++){
-      const group=new THREE.Group();
-      const face=new THREE.Mesh(coinFaceGeo,coinGold);
-      face.rotation.x=Math.PI/2;group.add(face);
-      const ring=new THREE.Mesh(coinRingGeo,coinRim);
-      ring.position.z=.079;group.add(ring);
-      const star=new THREE.Mesh(coinStarGeo,coinRim);
-      star.position.z=.082;group.add(star);
-      scene.add(group);
-      coins.push({group,at:24+i*12,lane:(i%7<4?-.92:1.15)});
+    let nextCoinAt=24;
+
+    function newCoinBatch(){
+      const geometries=[coinFaceGeo,coinRingGeo,coinStarGeo];
+      const materials=[coinGold,coinRim,coinRim];
+      const meshes=geometries.map((geometry,index)=>{
+        const mesh=new THREE.InstancedMesh(geometry,materials[index],COIN_BATCH_SIZE);
+        mesh.count=0;
+        // Posiciones de instancia absolutas: decidir visibilidad por tramo.
+        mesh.frustumCulled=false;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(mesh);
+        return mesh;
+      });
+      const batch={meshes,firstAt:nextCoinAt,lastAt:nextCoinAt,count:0};
+      coinBatches.push(batch);
+      return batch;
     }
-    function resetCoins(){
-      coinCount=0;coinCountEl.textContent='0';
-      for(let i=0;i<coins.length;i++)coins[i].at=24+i*12;
-    }
-    function updateCoins(dt){
-      for(const coin of coins){
-        let delta=coin.at-distance;
-        if(delta<-5){coin.at+=coins.length*12;delta=coin.at-distance;}
-        if(active&&!paused&&Math.abs(delta)<1.6&&Math.abs(rider.position.x-coin.lane)<1.05){
-          coinCount++;coinCountEl.textContent=String(coinCount);
-          coin.at+=coins.length*12;
-          const badge=document.getElementById('coinBadge');
-          badge.classList.remove('collected');void badge.offsetWidth;badge.classList.add('collected');
-        }
-        coin.group.position.set(coin.lane,1.45+Math.sin(rivalClock*2+coin.at*.1)*.18,-coin.at);
-        coin.group.rotation.y+=dt*2.6;
+    function setCoinTransform(coin,angle,hover){
+      coinDummy.position.set(coin.lane,1.45+hover,-coin.at);
+      coinDummy.rotation.set(0,angle,0);
+      coinDummy.scale.setScalar(coin.collected?0.000001:1);
+      coinDummy.updateMatrix();
+      for(const mesh of coin.batch.meshes){
+        mesh.setMatrixAt(coin.slot,coinDummy.matrix);
+        mesh.instanceMatrix.needsUpdate=true;
       }
     }
+    function spawnCoin(at){
+      let batch=coinBatches[coinBatches.length-1];
+      if(!batch || batch.count>=COIN_BATCH_SIZE)batch=newCoinBatch();
+      const i=coins.length;
+      const coin={
+        at,lane:i%7<4?-.92:1.15,
+        batch,slot:batch.count,collected:false
+      };
+      batch.count++;
+      batch.lastAt=at;
+      for(const mesh of batch.meshes)mesh.count=batch.count;
+      coins.push(coin);
+      setCoinTransform(coin,0,0);
+    }
+    function ensureCoinsAhead(traveled){
+      const limit=traveled+COIN_LOOKAHEAD;
+      while(nextCoinAt<=limit){
+        spawnCoin(nextCoinAt);
+        nextCoinAt+=COIN_SPACING;
+      }
+    }
+    function resetCoins(){
+      // Una partida nueva recupera las chapitas; las que no se cogieron
+      // nunca fueron recicladas ni eliminadas durante la partida anterior.
+      for(const batch of coinBatches){
+        for(const mesh of batch.meshes)scene.remove(mesh);
+      }
+      coinBatches.length=0;
+      coins.length=0;
+      coinCount=0;
+      coinCountEl.textContent='0';
+      nextCoinAt=24;
+      ensureCoinsAhead(0);
+    }
+    function updateCoins(dt){
+      // Continuar generando nuevas chapitas más adelante sin mover las
+      // que el jugador ya dejó atrás.
+      if(active)ensureCoinsAhead(distance);
+      const first=Math.max(0,Math.floor((distance-55-24)/COIN_SPACING));
+      for(let i=first;i<coins.length;i++){
+        const coin=coins[i];
+        const ahead=coin.at-distance;
+        if(ahead>COIN_LOOKAHEAD+10)break;
+        if(coin.collected)continue;
+        if(active && !paused &&
+          Math.abs(ahead)<1.6 &&
+          Math.abs(rider.position.x-coin.lane)<1.05){
+          coin.collected=true;
+          coinCount++;
+          coinCountEl.textContent=String(coinCount);
+          score+=COIN_POINTS;
+          scoreEl.textContent=formatScore(score);
+          setCoinTransform(coin,0,0);
+          const badge=document.getElementById('coinBadge');
+          badge.classList.remove('collected');
+          void badge.offsetWidth;
+          badge.classList.add('collected');
+          continue;
+        }
+        // El balanceo visual cambia, pero nunca la ubicación en la pista.
+        const bob=Math.sin(rivalClock*2+coin.at*.1)*.18;
+        setCoinTransform(coin,rivalClock*2.6+coin.at*.10,bob);
+      }
+      // Solo se dibujan los lotes cercanos a la cámara. Los lotes lejanos
+      // continúan almacenados con sus posiciones intactas.
+      for(const batch of coinBatches){
+        const visible=batch.lastAt>=distance-65 &&
+          batch.firstAt<=distance+COIN_LOOKAHEAD+25;
+        for(const mesh of batch.meshes)mesh.visible=visible;
+      }
+    }
+    // Las chapitas iniciales ya están visibles en el menú.
+    ensureCoinsAhead(0);
 
     const keys = { gas: false };
     let paused=false;
