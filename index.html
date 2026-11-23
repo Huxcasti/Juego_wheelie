@@ -534,87 +534,165 @@
     }
 
 
-    // Conductor 3D estilizado inspirado en la fotografía del jugador:
-    // cabello negro corto con fade, camisa blanca de mangas cortas,
-    // pantalón oscuro, reloj blanco y manos sobre el manubrio.
-    // Creado con geometría; la fotografía privada no se sube a GitHub.
+    // Conductor 3D articulado para iPhone. Materiales y anatomía originales
+    // sin utilizar fotografías o modelos de personas de terceros.
+    let avatarRig = null;
     function createAvatar() {
       const person = new THREE.Group();
-      person.name = 'Conductor personalizado';
-      const skin = mat(0xb78060, .82), skinShade = mat(0x9d674e, .9);
-      const hair = mat(0x1b1718, .96), fadedHair = mat(0x352b28, .95);
-      const shirt = mat(0xf1f0e8, .8), collar = mat(0xe5e4de, .88);
-      const pants = mat(0x202731, .95), shoes = mat(0x121519, .91);
-      const eyes = mat(0x36251c), eyeWhite=mat(0xf5eee4), black = mat(0x2b2221);
-      const watch = mat(0xf3f2eb,.5), watchFace = mat(0x393f48,.5);
+      person.name = 'Conductor Huxcasti animado';
 
-      const ellipsoid = (parent,material,pos,scales,seg=12) => {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(1,seg,9),material);
-        m.position.set(...pos);m.scale.set(...scales);m.castShadow=true;parent.add(m);return m;
+      const skin = mat(0xb98265,.79), skinShade=mat(0x9f6c51,.87);
+      const hair=mat(0x171719,.94), fadedHair=mat(0x332927,.94);
+      const shirt=mat(0xf4f2ed,.83),shirtShade=mat(0xd7dce0,.86);
+      const pants=mat(0x242c36,.92), shoes=mat(0x15191c,.87);
+      const eyeWhite=mat(0xfff2e4,.75), eyes=mat(0x271b19,.76);
+      const watch=mat(0xf6f7f8,.4),watchFace=mat(0x353f4c,.42);
+
+      const ballGeo=new THREE.SphereGeometry(1,16,12);
+      const segmentGeo=new THREE.CylinderGeometry(1,1,1,12);
+      const yAxis=new THREE.Vector3(0,1,0);
+      const sphere=(parent,material,p,s)=>{
+        const m=new THREE.Mesh(ballGeo,material);
+        m.position.set(...p);m.scale.set(...s);
+        m.castShadow=true;m.receiveShadow=true;parent.add(m);
+        return m;
       };
-      const limb = (parent,a,b,rad,material) => {
-        const av=new THREE.Vector3(...a), bv=new THREE.Vector3(...b);
-        const dir=bv.clone().sub(av);
-        const m=new THREE.Mesh(new THREE.CylinderGeometry(rad*.91,rad,dir.length(),9),material);
-        m.position.copy(av).add(bv).multiplyScalar(.5);
-        m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());
-        m.castShadow=true;parent.add(m);return m;
+      const segment=(parent,material,r1,r2)=>{
+        const geometry=new THREE.CylinderGeometry(r1,r2,1,12);
+        const m=new THREE.Mesh(geometry,material);
+        m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
       };
-      const box=(parent,pos,size,material)=>{
-        const m=new THREE.Mesh(new THREE.BoxGeometry(...size),material);
-        m.position.set(...pos);m.castShadow=true;parent.add(m);return m;
+      const fitSegment=(m,a,b)=>{
+        const vec=b.clone().sub(a),length=vec.length();
+        m.position.copy(a).add(b).multiplyScalar(.5);
+        m.quaternion.setFromUnitVectors(yAxis,vec.multiplyScalar(1/Math.max(length,.0001)));
+        m.scale.set(1,length,1);
       };
-      // El modelo mira hacia el frente de la pista (-Z).
-      ellipsoid(person,pants,[0,1.10,.21],[.31,.19,.25]);
-      // Piernas sentadas, rodillas hacia adelante.
-      for (const side of [-1,1]) {
-        const hip=[side*.17,1.12,.18],knee=[side*.27,.89,-.29],ankle=[side*.34,.61,-.35];
-        limb(person,hip,knee,.145,pants);
-        ellipsoid(person,pants,knee,[.15,.13,.16]);
-        limb(person,knee,ankle,.105,pants);
-        ellipsoid(person,shoes,[side*.34,.56,-.45],[.15,.09,.24]);
-      }
-      // Torso ligeramente inclinado hacia el guía.
-      const chest = ellipsoid(person,shirt,[0,1.56,.07],[.34,.37,.20]);
-      chest.rotation.x=-.16;
-      box(person,[0,1.38,.20],[.45,.19,.22],shirt);
-      // Cuello y cuello abierto de camisa tipo polo.
-      limb(person,[0,1.80,.02],[0,1.93,-.015],.099,skin);
+
+      // Cadera y torso separados para balancearse sin mover el vehículo.
+      const hips=new THREE.Group();
+      hips.position.set(0,1.11,.18);person.add(hips);
+      sphere(hips,pants,[0,-.045,0],[.32,.19,.27]);
+      const torso=new THREE.Group();
+      torso.position.set(0,.16,-.09);
+      hips.add(torso);
+      sphere(torso,shirt,[0,.29,-.03],[.34,.38,.22]);
+      sphere(torso,shirtShade,[0,.12,.01],[.27,.18,.18]);
+      // Camisa tipo polo: cuello discreto y costura.
+      sphere(torso,shirtShade,[0,.53,-.09],[.18,.055,.14]);
+      sphere(torso,skin,[0,.59,-.09],[.098,.13,.096]);
+      const chestLine=new THREE.Mesh(new THREE.BoxGeometry(.024,.17,.018),shirtShade);
+      chestLine.position.set(0,.40,-.232);torso.add(chestLine);
+
+      const neck=new THREE.Group();
+      neck.position.set(0,.73,-.09);torso.add(neck);
+      sphere(neck,skin,[0,.095,0],[.205,.247,.19]);
+      sphere(neck,skin,[-.197,.08,0],[.043,.072,.044]);
+      sphere(neck,skin,[.197,.08,0],[.043,.072,.044]);
+      sphere(neck,hair,[0,.274,.012],[.21,.084,.192]);
       for(const side of [-1,1]){
-        const collarPiece=ellipsoid(person,collar,[side*.09,1.83,-.12],[.095,.075,.03]);
-        collarPiece.rotation.z=side*.33;
-        const shoulder=[side*.32,1.71,.045];
-        const elbow=[side*.42,1.43,-.29];
-        const wrist=[side*.51,1.42,-.69];
-        limb(person,shoulder,[side*.37,1.54,-.10],.137,shirt);
-        limb(person,[side*.37,1.54,-.10],elbow,.104,skin);
-        ellipsoid(person,skin,elbow,[.092,.096,.092]);
-        limb(person,elbow,wrist,.082,skin);
-        ellipsoid(person,skin,[side*.51,1.42,-.70],[.108,.072,.105]);
-        if(side===-1){
-          const wristWatch=ellipsoid(person,watch,[side*.495,1.424,-.60],[.10,.096,.065]);
-          ellipsoid(person,watchFace,[side*.495,1.49,-.60],[.067,.018,.045]);
-        }
+        sphere(neck,fadedHair,[side*.174,.19,.012],[.034,.074,.145]);
+        sphere(neck,eyeWhite,[side*.082,.116,-.181],[.043,.025,.013]);
+        sphere(neck,eyes,[side*.082,.114,-.193],[.019,.020,.010]);
+        const brow=sphere(neck,hair,[side*.084,.159,-.186],[.075,.014,.016]);
+        brow.rotation.z=side*.14;
       }
-      // Forma de la cara y peinado corto de lados rebajados (sin textura fotográfica).
-      const head=ellipsoid(person,skin,[0,2.085,-.02],[.205,.244,.19],20);
-      ellipsoid(person,skin,[-.198,2.07,-.025],[.047,.075,.041]);
-      ellipsoid(person,skin,[ .198,2.07,-.025],[.047,.075,.041]);
-      ellipsoid(person,hair,[0,2.265,-.014],[.209,.074,.191],20);
-      ellipsoid(person,fadedHair,[-.172,2.187,.007],[.033,.06,.14]);
-      ellipsoid(person,fadedHair,[.172,2.187,.007],[.033,.06,.14]);
-      // Rasgos visibles en cámara frontal, discretos y estilizados.
+      sphere(neck,skinShade,[0,.046,-.200],[.033,.053,.037]);
+      sphere(neck,skinShade,[0,-.01,-.173],[.072,.012,.011]);
+
+      // Anclajes de hombros pegados al torso: posición dinámica al inclinarse.
+      const arms=[];
       for(const side of [-1,1]){
-        ellipsoid(person,eyeWhite,[side*.083,2.103,-.190],[.046,.027,.011]);
-        ellipsoid(person,eyes,[side*.083,2.102,-.201],[.022,.023,.012]);
-        const brow=box(person,[side*.083,2.151,-.195],[.085,.014,.015],hair);
-        brow.rotation.z=side*.10;
+        const shoulder=new THREE.Group();
+        shoulder.position.set(side*.31,.43,-.025);torso.add(shoulder);
+        sphere(shoulder,shirt,[0,0,0],[.145,.15,.16]);
+        const sleeve=segment(person,shirt,.137,.126);
+        const upper=segment(person,skin,.106,.095);
+        const forearm=segment(person,skin,.084,.074);
+        const elbow=sphere(person,skin,[0,0,0],[.095,.102,.095]);
+        const wrist=sphere(person,skin,[0,0,0],[.085,.067,.077]);
+        const hand=sphere(person,skin,[side*.51,1.42,-.69],[.108,.075,.118]);
+        const watchBand=side<0?sphere(person,watch,[0,0,0],[.10,.081,.083]):null;
+        const watchDial=side<0?sphere(person,watchFace,[0,0,0],[.053,.024,.047]):null;
+        arms.push({side,shoulder,sleeve,upper,forearm,elbow,wrist,hand,watchBand,watchDial});
       }
-      ellipsoid(person,skinShade,[0,2.03,-.211],[.036,.055,.036]);
-      ellipsoid(person,black,[0,1.967,-.189],[.069,.012,.009]);
-      person.position.set(0,0.04,.14);
+      // Piernas con rodillas y tobillos propios (sentado sobre el FourTrax).
+      const legs=[];
+      for(const side of [-1,1]){
+        const thigh=segment(person,pants,.15,.14);
+        const calf=segment(person,pants,.115,.096);
+        const knee=sphere(person,pants,[side*.28,.90,-.29],[.15,.145,.16]);
+        const foot=sphere(person,shoes,[side*.34,.56,-.43],[.15,.105,.255]);
+        legs.push({side,thigh,calf,knee,foot});
+      }
+      person.position.set(0,.04,.14);
+      avatarRig={person,hips,torso,neck,arms,legs,fitSegment,rideClock:0};
       return person;
     }
+
+    function updateAvatarAnimation(dt) {
+      const rig=avatarRig;
+      if(!rig || !rig.person.parent) return;
+      rig.rideClock+=dt;
+      const phase=rig.rideClock;
+      const accelerating=active && !paused;
+      const fast=accelerating ? THREE.MathUtils.clamp(speed/22,0,1) : 0;
+      const wheelie=accelerating ? THREE.MathUtils.clamp(tilt/1.5,0,1) : 0;
+      const steer=accelerating ? lateralMotion : 0;
+      const bounce=Math.sin(phase*(5+fast*9))*.012*fast;
+      const breath=Math.sin(phase*2.4)*.009;
+
+      // El torso anticipa el wheelie y las curvas; la cabeza compensa.
+      rig.hips.position.y=1.11+bounce;
+      rig.hips.rotation.z=THREE.MathUtils.damp(rig.hips.rotation.z,-steer*.09,8,dt);
+      rig.hips.rotation.y=THREE.MathUtils.damp(rig.hips.rotation.y,-steer*.08,8,dt);
+      rig.torso.rotation.x=THREE.MathUtils.damp(rig.torso.rotation.x,-.11-wheelie*.40-fast*.045,6,dt);
+      rig.torso.rotation.z=THREE.MathUtils.damp(rig.torso.rotation.z,-steer*.20+breath,7,dt);
+      rig.torso.rotation.y=THREE.MathUtils.damp(rig.torso.rotation.y,-steer*.12,7,dt);
+      rig.neck.rotation.x=THREE.MathUtils.damp(rig.neck.rotation.x,.08+wheelie*.20,5,dt);
+      rig.neck.rotation.z=THREE.MathUtils.damp(rig.neck.rotation.z,steer*.10,6,dt);
+      rig.neck.rotation.y=THREE.MathUtils.damp(rig.neck.rotation.y,-steer*.16,5,dt);
+
+      // Actualiza matrices de los hombros para calcular brazos que
+      // conecten con las empuñaduras, incluso al cambiar la inclinación.
+      rig.person.updateWorldMatrix(true,true);
+      for(const arm of rig.arms){
+        const shoulder=arm.shoulder.getWorldPosition(new THREE.Vector3());
+        rig.person.worldToLocal(shoulder);
+        const grip=new THREE.Vector3(arm.side*.51,1.42,-.69);
+        const elbow=shoulder.clone().lerp(grip,.55);
+        elbow.x+=arm.side*(.075+wheelie*.018);
+        elbow.y-=.075+wheelie*.035;
+        elbow.z+=.045+fast*.022;
+        const sleeveEnd=shoulder.clone().lerp(elbow,.38);
+        rig.fitSegment(arm.sleeve,shoulder,sleeveEnd);
+        rig.fitSegment(arm.upper,sleeveEnd,elbow);
+        rig.fitSegment(arm.forearm,elbow,grip);
+        arm.elbow.position.copy(elbow);
+        arm.wrist.position.copy(grip).lerp(elbow,.09);
+        arm.hand.position.copy(grip);
+        if(arm.watchBand){
+          arm.watchBand.position.copy(grip).lerp(elbow,.18);
+          arm.watchDial.position.copy(arm.watchBand.position);
+          arm.watchDial.position.y+=.065;
+        }
+      }
+
+      for(const leg of rig.legs){
+        const side=leg.side;
+        const hip=new THREE.Vector3(side*.17,1.12+bounce,.18);
+        const knee=new THREE.Vector3(side*(.27+.018*wheelie),.89+bounce*.7,
+          -.29-.055*wheelie+Math.sin(phase*5+side)*.012*fast);
+        const ankle=new THREE.Vector3(side*.34,.61+bounce*.30,
+          -.35-.013*fast);
+        rig.fitSegment(leg.thigh,hip,knee);
+        rig.fitSegment(leg.calf,knee,ankle);
+        leg.knee.position.copy(knee);
+        leg.foot.position.set(side*.34,.555+bounce*.25,-.43-.015*wheelie);
+        leg.foot.rotation.x=-wheelie*.12;
+      }
+    }
+
     function attachAvatar(){
       if(!avatar)avatar=createAvatar();
       vehicle.add(avatar);
@@ -1179,6 +1257,7 @@
       rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
       vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
       rearPivot.rotation.set(0, 0, 0);
+      if(avatarRig){avatarRig.rideClock=0;avatarRig.hips.rotation.set(0,0,0);avatarRig.torso.rotation.set(0,0,0);avatarRig.neck.rotation.set(0,0,0);}
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
     }
@@ -1302,10 +1381,11 @@
         rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
         vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
         rearPivot.rotation.x = tilt;
+        updateAvatarAnimation(dt);
         keepVehicleAboveRoad();
         updateRoadWrap();
       }
-      if(!paused){updateRival(dt);updateCoins(dt);}
+      if(!paused){if(!active)updateAvatarAnimation(dt);updateRival(dt);updateCoins(dt);}
 
       // Animación breve tras pasarse del punto de equilibrio.
       if(!active && crashKind==='backflip' && crashFallProgress < 1){
