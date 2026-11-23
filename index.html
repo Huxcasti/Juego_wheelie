@@ -1275,33 +1275,7 @@
     /* Carros que vienen de frente. Las distancias están relativas al FourTrax,
        por lo que el tráfico sigue apareciendo a medida que avanzas. */
     const oncomingCars = [];
-    const vehiclePaints = [0xc23737, 0x2664be, 0xb9b7b0, 0xe6bd4b, 0x286b59];
-    const glassPaint = mat(0x789aa8), tirePaint = mat(0x17191b);
-    const lampPaint = new THREE.MeshBasicMaterial({color:0xfff2bf});
-    function makeOncomingCar(color) {
-      const group = new THREE.Group();
-      const carPaint = mat(color);
-      function carPart(w,h,d,x,y,z,material) {
-        const part = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
-        part.position.set(x,y,z);part.castShadow=true;part.receiveShadow=true;group.add(part);
-        return part;
-      }
-      carPart(1.65,.48,2.85,0,.61,0,carPaint);
-      carPart(1.40,.52,1.32,0,1.09,-.17,glassPaint);
-      carPart(1.47,.10,.27,0,1.34,-.87,carPaint);
-      for(const x of [-.55,.55]){
-        carPart(.32,.18,.07,x,.61,1.45,lampPaint);
-        carPart(.26,.12,.06,x,.59,-1.45,mat(0xa9362f));
-      }
-      const rolling = [];
-      for(const x of [-.85,.85]) for(const z of [-.90,.90]){
-        const pivot = new THREE.Group();pivot.position.set(x,.34,z);
-        const tire = new THREE.Mesh(new THREE.CylinderGeometry(.30,.30,.22,12),tirePaint);
-        tire.rotation.z = Math.PI/2;pivot.add(tire);group.add(pivot);rolling.push(pivot);
-      }
-      return {group,rolling};
-    }
-
+    // Nunca utilizar los antiguos carros cúbicos de prueba.
     function makeOncomingBus(){
       const group=new THREE.Group(),rolling=[];
       const pink=mat(0xf01ca7,.45),purple=mat(0x8228c5,.44),windowMat=mat(0x264a7b,.3),tire=mat(0x1a2028);
@@ -1450,14 +1424,18 @@
     }
 
     for(let i=0;i<12;i++){
-      // Conservamos cuatro carros, la camioneta clásica y el autobús.
-      // Otros seis slots alternan entre los diez modelos del paquete real.
-      const model = i===5 ? makeOncomingBus() :
-        i===4 ? makeVintage1970Truck() :
-        makeOncomingCar(vehiclePaints[i%vehiclePaints.length]);
+      // Diez espacios reservados exclusivamente para carros del GLB
+      // original, una camioneta clásica y el autobús ABCO. Ningún
+      // modelo rectangular de respaldo se muestra al jugador.
+      const isPassenger=i!==4&&i!==5;
+      const model=i===5?makeOncomingBus():
+        i===4?makeVintage1970Truck():
+        {group:new THREE.Group(),rolling:[]};
+      model.group.visible=!isPassenger && i!==5;
       scene.add(model.group);
       oncomingCars.push({...model,ahead:0,speed:0,lane:0,
-        isPackPlaceholder:i>=6,variantIndex:-1});
+        isPackPlaceholder:isPassenger,variantIndex:-1,
+        modelReady:!isPassenger&&i!==5});
     }
 
 
@@ -1627,6 +1605,9 @@
       scene.add(model.group);
       Object.assign(car,model);
       car.variantIndex=variantIndex%passengerMeshes.length;
+      car.isPackPlaceholder=true;
+      car.modelReady=true;
+      car.group.visible=true;
     }
     async function loadPassengerCarPack(){
       try{
@@ -1640,7 +1621,7 @@
         ).arrayBuffer();
         const cars=decodePassengerPack(bytes);
         passengerMeshes.push(...cars);
-        // Los slots pueden mostrar placeholders mientras el archivo llega.
+        // Solo activar cada modelo cuando ha terminado de cargarse.
         const packSlots=oncomingCars.filter(car=>car.isPackPlaceholder);
         packSlots.forEach((car,i)=>installPassengerVariant(car,i));
         nextPassengerVariant=packSlots.length;
@@ -1648,7 +1629,11 @@
         console.info('Carros nuevos cargados desde paquete original:',
           passengerMeshes.map(c=>c.name).join(', '));
       }catch(err){
-        console.warn('Se mantienen los carros de respaldo',err);
+        // Si Safari falla al cargar el paquete, NO mostrar carros falsos.
+        console.warn('Paquete de carros no disponible:',err);
+        for(const car of oncomingCars){
+          if(car.isPackPlaceholder&&!car.modelReady)car.group.visible=false;
+        }
       }
     }
 
@@ -1718,11 +1703,15 @@
         existing.collisionHalfLength=dimensions.z*.5+.24;
         existing.collisionHalfWidth=dimensions.x*.5+.38;
         existing.modelLoaded=true;
+        existing.modelReady=true;
+        existing.group.visible=true;
         console.info('Autobús ABCO cargado: ',dimensions.x.toFixed(2),
           'm ancho, ',dimensions.z.toFixed(2),'m largo');
       }catch(err){
-        // Conservar el autobús provisional en lugar de bloquear el juego.
-        console.warn('Se mantiene el autobús de respaldo:',err);
+        // No mostrar un autobús rosado de bloques si falla el GLB.
+        const bus=oncomingCars.find(car=>car.isBus);
+        if(bus){bus.modelReady=false;bus.group.visible=false;}
+        console.warn('Autobús ABCO sin cargar:',err);
       }
     }
 
@@ -1735,12 +1724,13 @@
         car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
         car.lane=carLanes[(i+Math.floor(Math.random()*carLanes.length))%carLanes.length];
         car.group.position.set(car.lane,0,-car.ahead);
-        car.group.visible=true;
+        car.group.visible=car.modelReady===true;
       });
     }
     function updateOncomingTraffic(dt){
       let nearest=Infinity;
       for(const car of oncomingCars){
+        if(!car.modelReady)continue; // Sin modelo = sin dibujo ni colisión.
         car.ahead -= (speed + car.speed)*dt;
         if(car.ahead < -Math.max(16,car.collisionHalfLength||2)){
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
@@ -1945,6 +1935,7 @@
       let risk=0;
       // Carros y guaguas en sentido contrario.
       for(const car of oncomingCars){
+        if(!car.modelReady)continue;
         const ahead=botZ-car.group.position.z;
         if(ahead < -4 || ahead > 125)continue;
         const relativeSpeed=Math.max(5,speed)+car.speed;
@@ -2057,6 +2048,7 @@
       // carro, cono, reductor o badén.
       let nearbyDanger=false;
       for(const car of oncomingCars){
+        if(!car.modelReady)continue;
         const ahead=botZ-car.group.position.z;
         if(ahead>-4 && ahead<29 &&
           Math.abs(car.lane-rival.group.position.x)<2.6){
