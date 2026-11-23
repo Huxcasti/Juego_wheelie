@@ -823,6 +823,10 @@
     const tmpSize = new THREE.Vector3();
     const tmpCenter = new THREE.Vector3();
     const modelStatus = document.getElementById('modelStatus');
+    // Impedir que la partida arranque mientras el Yamaha se instala.
+    // La carga del GLB es asíncrona; antes podía cambiar el modelo ya jugando.
+    let initialVehicleReady=false;
+    let pendingStart=false;
     loadCustomRider();
 
     function normalizeImportedModel(model) {
@@ -1039,13 +1043,22 @@
     });
 
     (async () => {
-      // Vehículo principal: Yamaha Raptor optimizado y con ruedas animadas.
-      try { await loadFourtrax('./assets/yamaha-raptor.glb'); return; }
-      catch (err) { console.warn('No se pudo cargar el Yamaha Raptor, usando respaldo.',err); }
-      try { await loadFourtrax('./assets/3d-honda-fourtrax-atv.glb'); return; }
-      catch (err) { console.warn('No hay modelo de respaldo.',err); }
-      try { const saved = await savedModelFile(); if (saved) { await loadFourtrax(saved); return; } } catch (err) { console.info('Sin modelo guardado.', err); }
-      modelStatus.textContent = 'No se pudo cargar el vehículo 3D';
+      // Primera carga: bloquear COMENZAR hasta recibir el Yamaha.
+      // Ante fallo continuar con el modelo provisional ligero, evitando
+      // descargar el Honda de 21 MB y congelar Safari innecesariamente.
+      try {
+        await loadFourtrax('./assets/yamaha-raptor.glb');
+      } catch (err) {
+        console.warn('Yamaha no disponible; se mantiene el FourTrax provisional.',err);
+        buildFallbackATV();
+        modelStatus.textContent='Vehículo provisional listo';
+      } finally {
+        initialVehicleReady=true;
+        if(pendingStart){
+          pendingStart=false;
+          reset();
+        }
+      }
     })();
 
 
@@ -1456,6 +1469,13 @@
     let crashKind = '';
     let crashFallProgress = 0;
     function reset() {
+      if(!initialVehicleReady){
+        pendingStart=true;
+        startBtn.hidden=false;
+        startBtn.textContent='CARGANDO FOURTRACK…';
+        messageEl.textContent='PREPARANDO EL YAMAHA RAPTOR…';
+        return;
+      }
       document.body.classList.add('playing');
       active = true;
       paused=false;document.body.classList.remove('paused');pauseBtn.textContent='Ⅱ';
@@ -1486,6 +1506,12 @@
       if(avatarRig){avatarRig.rideClock=0;avatarRig.hips.rotation.set(0,0,0);avatarRig.torso.rotation.set(0,0,0);avatarRig.neck.rotation.set(0,0,0);}
       customRiderClock=0;
       if(customRider){customRider.position.set(0,1.31,.10);customRider.rotation.set(0,0,0);}
+      // CRÍTICO: la cámara NO debe interpolar desde la posición de la
+      // partida anterior. En iPhone podía quedar detrás y mirar al cielo.
+      camera.position.set(.70,3.50,8.30);
+      camera.lookAt(.48,1.23,-7.20);
+      camera.updateMatrixWorld(true);
+      last=performance.now();
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
     }
@@ -1587,10 +1613,14 @@
       }
       if(!Number.isFinite(minY))return;
       const delta=contactY-minY;
-      if(Math.abs(delta)>.001){
-        rider.position.y+=delta;
-        rider.updateWorldMatrix(true,true);
-      }
+      if(!Number.isFinite(delta))return;
+      // Evitar saltos grandes de cámara por una medida temporal incorrecta
+      // de la geometría, p. ej. durante la inicialización del archivo GLB.
+      rider.position.y=THREE.MathUtils.clamp(
+        rider.position.y+THREE.MathUtils.clamp(delta,-.22,.22),
+        -.30,3.0
+      );
+      rider.updateWorldMatrix(true,true);
     }
 
     function frame(now) {
@@ -1682,9 +1712,25 @@
         rearPivot.rotation.x=THREE.MathUtils.lerp(tilt,Math.PI*.93,crashFallProgress);
         keepVehicleAboveRoad();
       }
-      camera.position.lerp(new THREE.Vector3(rider.position.x*.72+.70, 3.5+rider.position.y*.4, rider.position.z + 8.3), 0.085);
-      camera.lookAt(rider.position.x*.72+.48, 1.23+rider.position.y*.23, rider.position.z - 7.2);
-      renderer.render(scene, camera);
+      // Seguimiento de cámara independiente de los FPS. Si al reintentar
+      // hay una distancia grande, reencuadrar inmediatamente al jugador.
+      const targetCamera=new THREE.Vector3(
+        rider.position.x*.72+.70,
+        3.5+THREE.MathUtils.clamp(rider.position.y,-.25,3.0)*.4,
+        rider.position.z+8.3
+      );
+      const cameraGap=camera.position.distanceToSquared(targetCamera);
+      if(!Number.isFinite(cameraGap) || cameraGap>225){
+        camera.position.copy(targetCamera);
+      } else {
+        camera.position.lerp(targetCamera,1-Math.exp(-8*dt));
+      }
+      camera.lookAt(
+        rider.position.x*.72+.48,
+        1.23+THREE.MathUtils.clamp(rider.position.y,-.25,3.0)*.23,
+        rider.position.z-7.2
+      );
+      renderer.render(scene,camera);
     }
 
     requestAnimationFrame(frame);
