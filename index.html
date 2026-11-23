@@ -901,15 +901,40 @@
       }
       return {group,rolling};
     }
+
+    function makeOncomingBus(){
+      const group=new THREE.Group(),rolling=[];
+      const pink=mat(0xf01ca7,.45),purple=mat(0x8228c5,.44),windowMat=mat(0x264a7b,.3),tire=mat(0x1a2028);
+      const box=(w,h,d,x,y,z,m)=>{
+        const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+        mesh.position.set(x,y,z);mesh.castShadow=true;group.add(mesh);return mesh;
+      };
+      box(2.15,2.7,5.15,0,1.8,0,pink);
+      box(2.10,.35,5.08,0,3.12,0,purple);
+      for(const side of [-1,1])for(let i=0;i<5;i++)
+        box(.035,.88,.66,side*1.086,2.24,-1.77+i*.85,windowMat);
+      box(1.81,1.08,.045,0,2.32,2.60,windowMat);
+      box(1.75,.55,.04,0,.85,2.60,purple);
+      for(const side of [-.68,.68]){
+        box(.30,.16,.05,side,.67,2.64,new THREE.MeshBasicMaterial({color:0xffdd5e}));
+        box(.29,.15,.05,side,.70,-2.59,new THREE.MeshBasicMaterial({color:0xff4457}));
+      }
+      for(const x of [-1.07,1.07])for(const z of [-1.62,1.63]){
+        const pivot=new THREE.Group();pivot.position.set(x,.49,z);
+        const tireMesh=new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,.23,14),tire);
+        tireMesh.rotation.z=Math.PI/2;pivot.add(tireMesh);group.add(pivot);rolling.push(pivot);
+      }
+      return {group,rolling,isBus:true};
+    }
     for(let i=0;i<5;i++){
-      const model = makeOncomingCar(vehiclePaints[i]);
+      const model = i===4 ? makeOncomingBus() : makeOncomingCar(vehiclePaints[i]);
       scene.add(model.group);
       oncomingCars.push({ ...model, ahead:0, speed:0, lane:0 });
     }
     const carLanes = [-3.2,-1.1,1.1,3.2];
     function resetOncomingCars(){
       oncomingCars.forEach((car,i)=>{
-        car.ahead=54 + i*39 + i*i*2 + Math.random()*12;
+        car.ahead=i===4 ? 101+Math.random()*22 : 54 + i*39 + i*i*2 + Math.random()*12;
         car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
         car.lane=carLanes[(i+Math.floor(Math.random()*4))%carLanes.length];
         car.group.position.set(car.lane,0,-car.ahead);
@@ -929,8 +954,8 @@
         car.group.position.set(car.lane,0,rider.position.z-car.ahead);
         for(const tire of car.rolling)tire.rotation.x+=car.speed*dt/.30;
         if(car.ahead > 0)nearest=Math.min(nearest,car.ahead);
-        if(car.ahead > -1.9 && car.ahead < 1.9 &&
-          Math.abs(car.lane-rider.position.x)<1.57) {
+        if(car.ahead > (car.isBus?-3.0:-1.9) && car.ahead < (car.isBus?3.0:1.9) &&
+          Math.abs(car.lane-rider.position.x)<(car.isBus?1.85:1.57)) {
           finish('traffic');return;
         }
       }
@@ -942,7 +967,121 @@
     }
     resetOncomingCars();
 
+
+    // Rival verde de aspecto deportivo. Con geometría propia para no
+    // duplicar el modelo GLB de 21 MB del jugador ni cargar más texturas.
+    function createRival(){
+      const group=new THREE.Group(),bike=new THREE.Group();
+      group.add(bike);
+      const green=mat(0x28ee20,.35),dark=mat(0x161e25),metal=mat(0xb9cbd2,.38);
+      const blue=mat(0x145ec9,.49),white=mat(0xf4f8fc,.5),helmetMat=mat(0x1672ed,.24);
+      const wheels=[];
+      function part(geo,material,x,y,z,cast=true){
+        const mesh=new THREE.Mesh(geo,material);
+        mesh.position.set(x,y,z);mesh.castShadow=cast;bike.add(mesh);return mesh;
+      }
+      part(new THREE.BoxGeometry(1.25,.34,2.08),green,0,.86,0);
+      part(new THREE.BoxGeometry(.78,.21,.75),dark,0,1.14,.22);
+      part(new THREE.BoxGeometry(1.63,.19,.56),green,0,1.0,-.87);
+      part(new THREE.BoxGeometry(1.65,.14,.59),green,0,1.0,.87);
+      part(new THREE.BoxGeometry(.72,.22,1.55),metal,0,.65,0);
+      part(new THREE.CylinderGeometry(.11,.11,1.8,8),metal,0,1.38,-.57).rotation.z=Math.PI/2;
+      for(const x of [-.86,.86])for(const z of [-.82,.82]){
+        const pivot=new THREE.Group();pivot.position.set(x,.43,z);
+        const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.43,.43,.29,16),dark);
+        wheel.rotation.z=Math.PI/2;wheel.castShadow=true;pivot.add(wheel);
+        const rim=new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,.31,12),green);
+        rim.rotation.z=Math.PI/2;pivot.add(rim);
+        bike.add(pivot);wheels.push(pivot);
+      }
+      // Conductor con casco y traje de motocross azul.
+      const torso=part(new THREE.BoxGeometry(.72,.92,.38),blue,0,1.75,.12);
+      torso.rotation.x=-.28;
+      part(new THREE.BoxGeometry(.60,.19,.43),white,0,1.86,.06);
+      part(new THREE.SphereGeometry(.29,12,10),helmetMat,0,2.35,-.12);
+      const visor=part(new THREE.BoxGeometry(.39,.15,.09),dark,0,2.38,-.38);
+      visor.rotation.x=-.10;
+      for(const x of [-.37,.37]){
+        const arm=part(new THREE.CylinderGeometry(.12,.13,.70,8),blue,x,1.74,-.35);
+        arm.rotation.x=-.77;arm.rotation.z=x>0?.38:-.38;
+        const leg=part(new THREE.CylinderGeometry(.18,.18,.76,8),blue,x*.69,1.1,.48);
+        leg.rotation.x=.55;
+        part(new THREE.BoxGeometry(.29,.23,.37),dark,x*.67,.70,.82);
+      }
+      const lamp=new THREE.MeshBasicMaterial({color:0xff513a});
+      part(new THREE.BoxGeometry(.54,.1,.07),lamp,0,.96,1.09,false);
+      scene.add(group);
+      return {group,bike,wheels};
+    }
+    const rival=createRival();
+    let rivalClock=0;
+    function updateRival(dt){
+      rivalClock+=dt;
+      // Rival de acompañamiento: carrera visual; no interfiere con los controles.
+      rival.group.position.set(3.05+Math.sin(rivalClock*.55)*.28,0,
+        rider.position.z-6.1-Math.sin(rivalClock*.64)*.8);
+      rival.group.rotation.y=Math.sin(rivalClock*.4)*.036;
+      rival.bike.rotation.x=active&&speed>5 ? .11+Math.max(0,Math.sin(rivalClock*1.8))*.24 : .03;
+      for(const w of rival.wheels)w.rotation.x-=dt*Math.max(speed,5)/.43;
+    }
+
+    // Monedas 3D coleccionables: son puntos del juego, no dinero real.
+    const coinGold=new THREE.MeshStandardMaterial({color:0xffbd16,metalness:.62,roughness:.22,emissive:0xe08f00,emissiveIntensity:.27});
+    const coinRim=new THREE.MeshBasicMaterial({color:0xffec70});
+    const starShape=new THREE.Shape();
+    for(let k=0;k<10;k++){
+      const a=-Math.PI/2+k*Math.PI/5,r=k%2?.18:.37,x=Math.cos(a)*r,y=Math.sin(a)*r;
+      if(k===0)starShape.moveTo(x,y);else starShape.lineTo(x,y);
+    }
+    starShape.closePath();
+    const coinFaceGeo=new THREE.CylinderGeometry(.51,.51,.12,24);
+    const coinRingGeo=new THREE.TorusGeometry(.43,.065,8,24);
+    const coinStarGeo=new THREE.ShapeGeometry(starShape);
+    const coins=[];
+    const coinCountEl=document.getElementById('coinCount');
+    let coinCount=0;
+    for(let i=0;i<18;i++){
+      const group=new THREE.Group();
+      const face=new THREE.Mesh(coinFaceGeo,coinGold);
+      face.rotation.x=Math.PI/2;group.add(face);
+      const ring=new THREE.Mesh(coinRingGeo,coinRim);
+      ring.position.z=.079;group.add(ring);
+      const star=new THREE.Mesh(coinStarGeo,coinRim);
+      star.position.z=.082;group.add(star);
+      scene.add(group);
+      coins.push({group,at:24+i*12,lane:(i%7<4?-.92:1.15)});
+    }
+    function resetCoins(){
+      coinCount=0;coinCountEl.textContent='0';
+      for(let i=0;i<coins.length;i++)coins[i].at=24+i*12;
+    }
+    function updateCoins(dt){
+      for(const coin of coins){
+        let delta=coin.at-distance;
+        if(delta<-5){coin.at+=coins.length*12;delta=coin.at-distance;}
+        if(active&&!paused&&Math.abs(delta)<1.6&&Math.abs(rider.position.x-coin.lane)<1.05){
+          coinCount++;coinCountEl.textContent=String(coinCount);
+          coin.at+=coins.length*12;
+          const badge=document.getElementById('coinBadge');
+          badge.classList.remove('collected');void badge.offsetWidth;badge.classList.add('collected');
+        }
+        coin.group.position.set(coin.lane,1.45+Math.sin(rivalClock*2+coin.at*.1)*.18,-coin.at);
+        coin.group.rotation.y+=dt*2.6;
+      }
+    }
+
     const keys = { gas: false };
+    let paused=false;
+    const pauseBtn=document.getElementById('pauseBtn');
+    pauseBtn.addEventListener('click',()=>{
+      if(!active)return;
+      paused=!paused;
+      document.body.classList.toggle('paused',paused);
+      pauseBtn.textContent=paused?'▶':'Ⅱ';
+      pauseBtn.setAttribute('aria-label',paused?'Continuar juego':'Pausar juego');
+      keys.gas=false;
+      document.querySelectorAll('#controls .pressed').forEach(b=>b.classList.remove('pressed'));
+    });
     document.querySelectorAll('#controls [data-key]').forEach(btn => {
       const key = btn.dataset.key;
       const set = value => { keys[key] = value; btn.classList.toggle('pressed', value); };
@@ -992,6 +1131,8 @@
     function reset() {
       document.body.classList.add('playing');
       active = true;
+      paused=false;document.body.classList.remove('paused');pauseBtn.textContent='Ⅱ';
+      resetCoins();rivalClock=0;
       speed = 0;
       tilt = 0;
       elapsed = 0;
@@ -1017,6 +1158,7 @@
     function finish(reason = 'normal') {
       if (!active) return;
       crashKind = reason;
+      paused=false;document.body.classList.remove('paused');
       crashFallProgress = 0;
       document.body.classList.remove('playing');
       active = false;
@@ -1062,7 +1204,7 @@
       const dt = Math.min((now - last) / 1000, 0.04);
       last = now;
 
-      if (active) {
+      if (active && !paused) {
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
         distance += speed * dt;
         const targetSteer=steerValue || keyboardSteer;
@@ -1117,6 +1259,7 @@
         keepVehicleAboveRoad();
         updateRoadWrap();
       }
+      if(!paused){updateRival(dt);updateCoins(dt);}
 
       // Animación breve tras pasarse del punto de equilibrio.
       if(!active && crashKind==='backflip' && crashFallProgress < 1){
@@ -1124,8 +1267,8 @@
         rearPivot.rotation.x=THREE.MathUtils.lerp(tilt,Math.PI*.93,crashFallProgress);
         keepVehicleAboveRoad();
       }
-      camera.position.lerp(new THREE.Vector3(rider.position.x*.8, 2.8+rider.position.y*.45, rider.position.z + 6.2), 0.08);
-      camera.lookAt(rider.position.x, 1.15+rider.position.y*.25, rider.position.z - 2.3);
+      camera.position.lerp(new THREE.Vector3(rider.position.x*.72+.70, 3.5+rider.position.y*.4, rider.position.z + 8.3), 0.085);
+      camera.lookAt(rider.position.x*.72+.48, 1.23+rider.position.y*.23, rider.position.z - 7.2);
       renderer.render(scene, camera);
     }
 
