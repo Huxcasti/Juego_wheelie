@@ -847,6 +847,11 @@
       customRider=root;
       vehicle.add(root);
       if(avatar)avatar.visible=false;
+      // Si ya está el Yamaha del bot, equiparlo con una copia del
+      // mismo personaje texturizado (sin segunda descarga de su GLB).
+      if(typeof rival!=='undefined' && rival.modelMount){
+        installRivalDriver();
+      }
     }
     async function loadCustomRider(){
       try {
@@ -1044,6 +1049,10 @@
       normalizeImportedModel(importedModel);
       paintYamahaYellow(importedModel);
       attachAvatar();
+      // El Raptor rival comparte geometría con el jugador, pero
+      // tiene materiales independientes para conservar su color rojo.
+      if(importedModel.userData.vehicleType==='yamaha-raptor' &&
+        typeof rival!=='undefined') installRivalYamaha();
       modelLoaded = true;
       modelStatus.textContent = importedModel.userData.vehicleType==='yamaha-raptor' ?
         '✓ YAMAHA RAPTOR 3D CARGADO' : '✓ FOURTRACK 3D CARGADO';
@@ -1262,12 +1271,12 @@
     resetOncomingCars();
 
 
-    // Rival verde de aspecto deportivo. Con geometría propia para no
-    // duplicar el modelo GLB de 21 MB del jugador ni cargar más texturas.
+    // Rival rojo. Usa el modelo provisional hasta que cargue el Yamaha
+    // 3D del jugador; después se reemplaza por el mismo vehículo real.
     function createRival(){
       const group=new THREE.Group(),bike=new THREE.Group();
       group.add(bike);
-      const green=mat(0x28ee20,.35),dark=mat(0x161e25),metal=mat(0xb9cbd2,.38);
+      const green=mat(0xd92b28,.35),dark=mat(0x161e25),metal=mat(0xb9cbd2,.38);
       const blue=mat(0x145ec9,.49),white=mat(0xf4f8fc,.5),helmetMat=mat(0x1672ed,.24);
       const wheels=[];
       function part(geo,material,x,y,z,cast=true){
@@ -1305,10 +1314,98 @@
       const lamp=new THREE.MeshBasicMaterial({color:0xff513a});
       part(new THREE.BoxGeometry(.54,.1,.07),lamp,0,.96,1.09,false);
       scene.add(group);
-      return {group,bike,wheels};
+      return {group,bike,wheels,frontWheels:[],driverRoot:null,
+        modelMount:null,wheelSpin:0};
     }
     const rival=createRival();
     let rivalClock=0;
+    // El Yamaha del bot utiliza instancias clonadas del mismo GLB
+    // que maneja el jugador. Las geometrías y texturas se reutilizan.
+    function installRivalYamaha(){
+      if(!importedModel ||
+        importedModel.userData.vehicleType!=='yamaha-raptor')return;
+      try{
+        const clone=importedModel.clone(true);
+        clone.name='Yamaha Raptor rojo - bot';
+        // Clone(true) comparte materiales con el Yamaha amarillo:
+        // solo clonamos el plástico antes de colorearlo de rojo.
+        let painted=0;
+        clone.traverse(mesh=>{
+          if(!mesh.isMesh)return;
+          const parts=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+          if(mesh.name==='color_12193564'){
+            const redMaterials=parts.map(source=>{
+              if(!source)return source;
+              const m=source.clone();
+              m.color.setHex(0xe3272d);
+              m.roughness=.39;m.metalness=.07;
+              m.needsUpdate=true;
+              return m;
+            });
+            mesh.material=Array.isArray(mesh.material)?
+              redMaterials:redMaterials[0];
+            painted++;
+          }
+          mesh.castShadow=true;
+          mesh.receiveShadow=true;
+        });
+        // Mover el pivote de wheelie al eje trasero, igual que en
+        // el FourTrax del jugador. La carrocería no rota desde el suelo.
+        for(const child of [...rival.bike.children])rival.bike.remove(child);
+        rival.bike.rotation.set(0,0,0);
+        rival.bike.position.set(0,rearAxleY,rearAxleZ);
+        const mount=new THREE.Group();
+        mount.name='Montura Yamaha bot';
+        mount.position.set(0,-rearAxleY,-rearAxleZ);
+        rival.bike.add(mount);
+        mount.add(clone);
+        rival.modelMount=mount;
+        rival.visualModel=clone;
+        rival.wheels=[];
+        rival.frontWheels=[];
+        const tireData=[];
+        clone.updateWorldMatrix(true,true);
+        clone.traverse(mesh=>{
+          if(mesh.isMesh && /^YamahaWheel_(Front|Rear)_[LR]$/.test(mesh.name)){
+            const p=mesh.getWorldPosition(new THREE.Vector3());
+            tireData.push({mesh,z:p.z});
+            mesh.rotation.order='YXZ';
+          }
+        });
+        tireData.sort((a,b)=>a.z-b.z);
+        rival.wheels=tireData.map(d=>d.mesh);
+        if(tireData.length===4){
+          rival.frontWheels=tireData.slice(0,2).map(d=>d.mesh);
+        }
+        installRivalDriver();
+        console.info('Raptor bot rojo listo:',painted,
+          'paneles y',rival.wheels.length,'gomas');
+      }catch(err){
+        console.error('No se pudo preparar el Yamaha rojo del bot',err);
+      }
+    }
+    function installRivalDriver(){
+      if(!rival.modelMount)return;
+      if(rival.driverRoot){
+        rival.modelMount.remove(rival.driverRoot);
+        rival.driverRoot=null;
+      }
+      // Preferir la persona escaneada aportada por el usuario.
+      // Mientras carga, usar copia del avatar de respaldo.
+      const source=customRider||avatar;
+      if(!source)return;
+      const copy=source.clone(true);
+      copy.visible=true;
+      copy.name='Conductor 3D del rival';
+      // No trasladar animación ni posición del jugador a la copia.
+      if(customRider){
+        copy.position.set(0,1.31,.10);
+        copy.rotation.set(0,0,0);
+      }
+      rival.modelMount.add(copy);
+      rival.driverRoot=copy;
+      rival.driverBasePosition=copy.position.clone();
+    }
     // IA ligera del rival, sin dependencias ni cálculos de físicas pesados.
     // Las posiciones de los obstáculos y del tráfico son las mismas que
     // utiliza el jugador; el bot las predice hasta cuatro segundos antes.
@@ -1326,6 +1423,11 @@
       rival.group.position.set(3.2,0,-rivalAI.forwardOffset);
       rival.group.rotation.set(0,0,0);
       rival.bike.rotation.set(0,0,0);
+      rival.wheelSpin=0;
+      if(rival.driverRoot){
+        rival.driverRoot.rotation.set(0,0,0);
+        rival.driverRoot.position.copy(rival.driverBasePosition);
+      }
     }
     function rivalLaneRisk(laneX,fromX,botZ){
       const laneChangeTime=Math.abs(laneX-fromX)/4.1+.15;
@@ -1441,22 +1543,71 @@
       rival.group.position.y=THREE.MathUtils.damp(
         rival.group.position.y,groundRise,9,dt
       );
-      const smallWheelie=active&&speed>5?
-        .10+Math.max(0,Math.sin(rivalClock*1.6))*.16:.025;
+      // Wheelies visibles del bot cuando el carril está despejado.
+      // Baja las ruedas antes de cambiar de carril o de llegar a un
+      // carro, cono, reductor o badén.
+      let nearbyDanger=false;
+      for(const car of oncomingCars){
+        const ahead=botZ-car.group.position.z;
+        if(ahead>-4 && ahead<29 &&
+          Math.abs(car.lane-rival.group.position.x)<2.6){
+          nearbyDanger=true;break;
+        }
+      }
+      if(!nearbyDanger){
+        for(const o of obstacles){
+          if(o.kind!=='conos')continue;
+          const ahead=botZ-o.group.position.z;
+          if(ahead>-2 && ahead<22 &&
+            Math.abs(o.group.position.x-rival.group.position.x)<2.35){
+            nearbyDanger=true;break;
+          }
+        }
+      }
+      const stableLane=Math.abs(rivalAI.sideVelocity)<.8 &&
+        Math.abs(rivalAI.lane-rival.group.position.x)<.55;
+      const safeWheelie=active && speed>6 && !approachingBump &&
+        !nearbyDanger && stableLane;
+      const liftCycle=Math.max(0,Math.sin(rivalClock*1.12-1));
+      const desiredWheelie=safeWheelie?
+        .13+liftCycle*.76:0;
       const bumpPitch=THREE.MathUtils.clamp(
-        (frontHeight-rearHeight)*.34,-.075,.075
+        (frontHeight-rearHeight)*.30,-.065,.065
       );
       rival.bike.rotation.x=THREE.MathUtils.damp(
-        rival.bike.rotation.x,
-        (approachingBump?.025:smallWheelie)+bumpPitch,
-        5,dt
+        rival.bike.rotation.x,desiredWheelie+bumpPitch,
+        safeWheelie?2.5:7.0,dt
       );
       rival.bike.rotation.z=THREE.MathUtils.damp(
         rival.bike.rotation.z,-rivalAI.steering*.03,6,dt
       );
       const tireSpeed=approachingBump?.72:1;
+      rival.wheelSpin-=dt*Math.max(speed,5)*tireSpeed/.43;
       for(const wheel of rival.wheels){
-        wheel.rotation.x-=dt*Math.max(speed,5)*tireSpeed/.43;
+        wheel.rotation.x=rival.wheelSpin;
+        wheel.rotation.y=rival.frontWheels.includes(wheel)?
+          rivalAI.steering*.27:0;
+      }
+      if(rival.driverRoot){
+        // El piloto anticipa el wheelie y equilibra las curvas.
+        const base=rival.driverBasePosition;
+        const lean=THREE.MathUtils.clamp(
+          rival.bike.rotation.x/.9,0,1
+        );
+        rival.driverRoot.position.y=THREE.MathUtils.damp(
+          rival.driverRoot.position.y,
+          base.y+Math.sin(rivalClock*10)*.009*Math.min(speed/20,1),
+          7,dt
+        );
+        rival.driverRoot.rotation.x=THREE.MathUtils.damp(
+          rival.driverRoot.rotation.x,-lean*.22,6,dt
+        );
+        rival.driverRoot.rotation.z=THREE.MathUtils.damp(
+          rival.driverRoot.rotation.z,-rivalAI.steering*.12,6,dt
+        );
+        rival.driverRoot.rotation.y=THREE.MathUtils.damp(
+          rival.driverRoot.rotation.y,-rivalAI.steering*.06,6,dt
+        );
       }
     }
     resetRivalAI();
