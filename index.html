@@ -406,6 +406,8 @@
     const obstacles = [];
     const trackLength = 310;
     const warnEl = document.getElementById('roadAlert');
+    // Altura de la superficie bajo las ruedas; cero en asfalto plano.
+    let surfaceContactHeight = 0;
     function humpGeo(width, length, height) {
       const vertices = [], indices = [];
       const subdivisions = 12;
@@ -482,7 +484,10 @@
       const frontHeight=obstacleHeightAt(rider.position.z-vehicleLength*.35,rider.position.x);
       const rearHeight=obstacleHeightAt(rider.position.z+rearAxleZ*.9,rider.position.x);
       const surfaceHeight=Math.max(frontHeight,rearHeight);
-      rider.position.y=THREE.MathUtils.damp(rider.position.y,surfaceHeight+Math.sin(Math.max(0,tilt))*.05,12,dt);
+      surfaceContactHeight=surfaceHeight;
+      // La inclinación del wheelie no debe inventar separación del suelo.
+      // La altura final se resuelve contra las gomas en keepVehicleAboveRoad().
+      rider.position.y=THREE.MathUtils.damp(rider.position.y,surfaceHeight,12,dt);
       // El badén desestabiliza el wheelie, más notable a velocidad alta.
       if(surfaceHeight>.04)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
       for(const o of obstacles){
@@ -746,7 +751,7 @@
       importedModel = null;
       vehicleLength = 1.7;
       rearAxleZ = 0.72;
-      bodyClearance = 0.14;
+      bodyClearance = 0.015;
       modelLoaded = false;
     }
 
@@ -781,7 +786,9 @@
       tmpBox.getCenter(tmpCenter);
       tmpBox.getSize(tmpSize);
 
-      const lift = 0.22;
+      // 0.22 dejaba el modelo suspendido sobre el asfalto. El contacto
+      // se resuelve cada fotograma en la base de las ruedas.
+      const lift = 0.015;
       model.position.set(model.position.x - tmpCenter.x, model.position.y - tmpBox.min.y + lift, model.position.z - tmpCenter.z);
       model.updateMatrixWorld(true);
 
@@ -1363,6 +1370,7 @@
       resetOncomingCars();
       lateralMotion = 0;setSteer(0);
       positionObstacles(0);
+      surfaceContactHeight=0;
       warnEl.classList.remove('visible');
       wasWheelie = false;
       rider.position.set(0, 0, 0);
@@ -1419,11 +1427,58 @@
       }
     }
 
+    // Sombras de contacto suaves bajo las gomas, independientes de la
+    // sombra direccional: dejan claro que el peso está sobre el asfalto.
+    const contactShadows=[];
+    const shadowCanvas=document.createElement('canvas');
+    shadowCanvas.width=shadowCanvas.height=64;
+    const shadowCtx=shadowCanvas.getContext('2d');
+    if(shadowCtx){
+      const grad=shadowCtx.createRadialGradient(32,32,3,32,32,31);
+      grad.addColorStop(0,'rgba(0,0,0,.64)');
+      grad.addColorStop(.48,'rgba(0,0,0,.3)');
+      grad.addColorStop(1,'rgba(0,0,0,0)');
+      shadowCtx.fillStyle=grad;shadowCtx.fillRect(0,0,64,64);
+      const texture=new THREE.CanvasTexture(shadowCanvas);
+      texture.colorSpace=THREE.SRGBColorSpace;
+      for(const front of [false,true])for(const side of [-1,1]){
+        const material=new THREE.MeshBasicMaterial({
+          map:texture,transparent:true,opacity:.43,depthWrite:false,
+          polygonOffset:true,polygonOffsetFactor:-1
+        });
+        const mesh=new THREE.Mesh(new THREE.PlaneGeometry(.88,1.25),material);
+        mesh.rotation.x=-Math.PI/2;
+        mesh.renderOrder=2;scene.add(mesh);
+        contactShadows.push({mesh,front,side});
+      }
+    }
+    function updateContactShadows(){
+      const rise=THREE.MathUtils.clamp(tilt/1.45,0,1);
+      for(const item of contactShadows){
+        item.mesh.position.set(
+          rider.position.x+item.side*.80,
+          surfaceContactHeight+.023,
+          rider.position.z+(item.front?-.75:.75)
+        );
+        item.mesh.material.opacity=item.front?.43*(1-rise*.93):.51;
+      }
+    }
+
     function keepVehicleAboveRoad() {
+      // Medir el FourTrax (no la cabeza/manos del avatar): sus gomas
+      // determinan el apoyo en el suelo durante el wheelie.
       rider.updateWorldMatrix(true, true);
-      tmpBox.setFromObject(vehicle);
-      const minY = tmpBox.min.y;
-      if (minY < 0.02) rider.position.y += 0.02 - minY;
+      tmpBox.setFromObject(importedModel || vehicle);
+      const minY=tmpBox.min.y;
+      if(!Number.isFinite(minY))return;
+      const contactY=surfaceContactHeight+0.015;
+      // Corregir EN AMBOS SENTIDOS. Antes solo subía el vehículo si se
+      // hundía: cuando quedaba a 20 cm de la brea permanecía flotando.
+      const delta=contactY-minY;
+      if(Math.abs(delta)>0.002){
+        rider.position.y+=THREE.MathUtils.clamp(delta,-0.35,0.35);
+        rider.updateWorldMatrix(true,true);
+      }
     }
 
     function frame(now) {
@@ -1496,9 +1551,10 @@
         rearPivot.rotation.x = tilt;
         updateAvatarAnimation(dt);
         keepVehicleAboveRoad();
+        updateContactShadows();
         updateRoadWrap();
       }
-      if(!paused){if(!active)updateAvatarAnimation(dt);updateRival(dt);updateCoins(dt);}
+      if(!paused){if(!active){updateAvatarAnimation(dt);updateContactShadows();}updateRival(dt);updateCoins(dt);}
 
       // Animación breve tras pasarse del punto de equilibrio.
       if(!active && crashKind==='backflip' && crashFallProgress < 1){
