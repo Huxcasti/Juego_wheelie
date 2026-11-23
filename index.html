@@ -166,11 +166,17 @@
     #hud .pill small{color:#fff;font-size:clamp(8px,1.25vw,15px);font-weight:1000;font-style:italic;letter-spacing:.02em;text-shadow:0 2px 2px #0009}
     #hud .pill span{color:#ffd83a;font-size:clamp(16px,2.6vw,30px);font-style:italic;font-weight:1000;text-shadow:0 3px 0 #8c5700}
     #gameBrand{position:fixed;top:clamp(68px,11vw,114px);left:50%;transform:translateX(-50%) skew(-8deg);z-index:22;
-      pointer-events:none;text-align:center;filter:drop-shadow(0 5px 3px #000c);transition:opacity .2s;white-space:nowrap;line-height:.86}
-    #gameBrand b{display:block;font-size:clamp(26px,5.4vw,70px);letter-spacing:-.05em;color:white;-webkit-text-stroke:clamp(1px,.28vw,4px) #061123;
+      pointer-events:none;text-align:center;filter:drop-shadow(0 5px 3px #000c);transition:opacity .2s;white-space:nowrap;line-height:.86;
+      animation:brandPulse 1.6s ease-in-out infinite;will-change:transform,filter}
+    #gameBrand b{display:block;font-size:clamp(38px,8vw,95px);letter-spacing:-.05em;color:white;-webkit-text-stroke:clamp(1px,.28vw,4px) #061123;
       text-shadow:0 4px 0 #153958,0 7px 0 #091122;font-weight:1000}
-    #gameBrand strong{display:block;margin-top:5px;font-size:clamp(21px,4.2vw,54px);color:#ffdf36;
+    #gameBrand strong{display:block;margin-top:5px;font-size:clamp(31px,6.2vw,76px);color:#ffdf36;
       -webkit-text-stroke:clamp(1px,.23vw,3px) #101729;text-shadow:0 4px 0 #b3221b,0 7px 0 #0c1424;font-weight:1000}
+    @keyframes brandPulse{
+      0%,100%{transform:translateX(-50%) skew(-8deg) scale(1);filter:drop-shadow(0 5px 3px #000c)}
+      50%{transform:translateX(-50%) skew(-8deg) scale(1.10);filter:drop-shadow(0 6px 12px #ffe15a8a)}
+    }
+    @media(prefers-reduced-motion:reduce){#gameBrand{animation:none}}
     body.playing #gameBrand{opacity:0}
     #coinBadge{position:fixed;top:clamp(78px,12vw,124px);right:max(12px,env(safe-area-inset-right));z-index:30;
       color:#ffe35c;background:#06162bd9;border:1px solid #ffd75f99;border-radius:40px;padding:7px 13px;
@@ -235,7 +241,7 @@
   <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
   <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
-  <div id="message">WHEELIE CHALLENGE</div>
+  <div id="message"></div>
   <button id="start">COMENZAR</button>
 
   <div id="modelPicker">
@@ -484,8 +490,9 @@
         const inZ=Math.abs(o.group.position.z-rider.position.z)<.85;
         const inX=Math.abs(o.group.position.x-rider.position.x)<1.35;
         if(inZ&&inX){
-          o.hit=true;speed*=.57;tilt=Math.min(1.62,tilt+.20);
-          messageEl.textContent='¡GOLPEASTE LOS CONOS!';
+          o.hit=true;
+          finish('cones');
+          return; // Colisión fatal: termina el intento inmediatamente.
         }
       }
       let closest=null;
@@ -1286,7 +1293,8 @@
       multiplierEl.textContent = 'RÉCORD: ' + formatScore(bestScore);
       scorePill.classList.remove('extreme');
       const reasonText = reason === 'backflip' ? '¡TE FUISTE DE ESPALDA!' :
-        reason === 'traffic' ? '¡CHOCASTE CONTRA UN CARRO!' : '¡INTENTO TERMINADO!';
+        reason === 'traffic' ? '¡CHOCASTE CONTRA UN CARRO!' :
+        reason === 'cones' ? '¡CHOCASTE CONTRA LOS CONOS!' : '¡INTENTO TERMINADO!';
       messageEl.textContent = reasonText + ' · ' + elapsed.toFixed(2) + ' s · ' + formatScore(score) + ' PTS';
       startBtn.textContent = 'REINTENTAR';
       startBtn.hidden = false;
