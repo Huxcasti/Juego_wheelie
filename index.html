@@ -1324,6 +1324,8 @@
       const group=new THREE.Group(),rolling=[];
       group.name='Camioneta clásica 1970 · tráfico';
       const orange=mat(0xc95b30,.43),orangeLight=mat(0xe7773d,.46);
+      // Los lados del perfil procedural deben verse desde cualquier ángulo.
+      orange.side=THREE.DoubleSide;
       const cream=mat(0xe7d4be,.66),chrome=new THREE.MeshStandardMaterial({
         color:0xbac6cd,metalness:.68,roughness:.26
       });
