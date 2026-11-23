@@ -1460,12 +1460,12 @@
       // comparten en GPU para no duplicar memoria entre partidas.
       const group=new THREE.Group();
       const realCar=template.group.clone(true);
-      // El GLB tenía el frente hacia -Z; los carros de frente avanzan
-      // hacia +Z. Girar únicamente los diez carros originales 180°
-      // para que se vea la parrilla, no el baúl, al acercarse.
-      // Se gira el modelo interno, no el contenedor del tráfico:
-      // mantiene intactos los carriles, colisiones y ruedas.
-      realCar.rotation.y=Math.PI;
+      // La mayoría de modelos originales apuntan hacia -Z y deben
+      // girarse para venir de frente (+Z). Excepción: el Coupé azul
+      // ya apunta a +Z en el GLB. Sus faros blancos están en +Z y
+      // las luces rojas en -Z. Girarlo lo hacía venir de reversa.
+      // Conservar intactos carriles, colisiones y tamaño del grupo.
+      realCar.rotation.y=template.name==='Coupe'?0:Math.PI;
       group.name='Carro original · '+template.name;
       group.add(realCar);
       const rolling=[];
