@@ -1478,6 +1478,10 @@
       [4.72,2.05],[4.48,1.95]
     ];
     const passengerMeshes=[];
+    // La geometría y los materiales de cada modelo se crean una sola
+    // vez. Al reaparecer, clonamos nodos (no recursos GPU) para evitar
+    // acumulación de memoria en partidas largas de Safari móvil.
+    const passengerCarTemplates=[];
     let loadedPassengerPack=false;
     let nextPassengerVariant=0;
     function passengerPartGeometry(view,cursor){
@@ -1533,6 +1537,20 @@
       return decoded;
     }
     function makePackedPassengerCar(index){
+      const cached=passengerCarTemplates[index];
+      if(cached){
+        const group=cached.group.clone(true);
+        const rolling=[];
+        group.traverse(obj=>{
+          if(obj.name==='PackCarWheelPivot')rolling.push(obj);
+        });
+        return {
+          group,rolling,wheelRadius:cached.wheelRadius,
+          collisionHalfWidth:cached.collisionHalfWidth,
+          collisionHalfLength:cached.collisionHalfLength,
+          passengerType:cached.passengerType
+        };
+      }
       const data=passengerMeshes[index];
       const group=new THREE.Group(),rolling=[];
       group.name='Carro real optimizado · '+data.name;
@@ -1571,6 +1589,7 @@
       const rimGeo=new THREE.CylinderGeometry(radius*.50,radius*.50,.216,10);
       for(const side of [-1,1])for(const z of [-axleLength,axleLength]){
         const pivot=new THREE.Group();
+        pivot.name='PackCarWheelPivot';
         pivot.position.set(side*width*.47,radius,z);
         const tire=new THREE.Mesh(tireGeo,tireMaterial);
         tire.rotation.z=Math.PI/2;tire.castShadow=true;pivot.add(tire);
@@ -1588,12 +1607,13 @@
         back.position.set(side*width*.34,.68,-length*.50);
         group.add(back);
       }
-      return {
-        group,rolling,wheelRadius:radius,
+      passengerCarTemplates[index]={
+        group,wheelRadius:radius,
         collisionHalfWidth:width*.5+.22,
         collisionHalfLength:length*.5+.15,
         passengerType:data.name
       };
+      return makePackedPassengerCar(index);
     }
     function installPassengerVariant(car,variantIndex){
       if(!passengerMeshes.length)return;
