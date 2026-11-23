@@ -1440,222 +1440,139 @@
     }
 
 
-    // Diez carrocerías del archivo original generic_passenger_car_pack.glb.
-    // Versión de alta fidelidad: conserva todos los triángulos de carrocería,
-    // cristales y faros. Los vértices se cuantizan a 0.5 mm, sin agruparlos
-    // ni destruir su topología. Comprimido ~345 KB frente al GLB de 26 MB.
-    // Los materiales usan colores sólidos en vez de texturas pesadas.
+    // Los diez carros provienen directamente de generic_passenger_car_pack.glb
+    // del usuario. Se conservan las mallas, las gomas y los materiales/
+    // texturas originales (redimensionadas para funcionar en iPhone).
+    // Ya NO se usan el paquete HPK2 sin UV ni carrocerías recreadas.
     const PASSENGER_NAMES=[
       'Compact','Coupe','Hatchback','Minivan','Offroad',
       'Pickup','Sedan','Sport','SUV','Wagon'
     ];
-    const PASSENGER_COLORS=[
-      0x00b6ed,0x1249bc,0xeacb16,0x751f22,0x343e31,
-      0x146a43,0xb7a14d,0xde2029,0x424a4a,0x4b7884
-    ];
-    const passengerSpecs=[
-      [3.45,1.86],[4.22,1.92],[3.80,1.86],[4.55,1.99],
-      [4.35,2.04],[5.00,2.02],[4.47,1.93],[4.17,1.96],
-      [4.72,2.05],[4.48,1.95]
-    ];
-    const passengerMeshes=[];
-    // La geometría y los materiales de cada modelo se crean una sola
-    // vez. Al reaparecer, clonamos nodos (no recursos GPU) para evitar
-    // acumulación de memoria en partidas largas de Safari móvil.
     const passengerCarTemplates=[];
     let loadedPassengerPack=false;
     let initialTrafficReady=false;
     let nextPassengerVariant=0;
-    function passengerPartGeometry(view,cursor){
-      if(cursor.offset+4>view.byteLength)throw new Error('Carro incompleto');
-      const vertices=view.getUint16(cursor.offset,true);
-      const triangles=view.getUint16(cursor.offset+2,true);
-      cursor.offset+=4;
-      // HPK2: posición xyz en int16 (0.49 mm), en vez de int8.
-      const coordinateCount=vertices*3;
-      const posBytes=coordinateCount*2,faceBytes=triangles*3*2;
-      if(cursor.offset+posBytes+faceBytes>view.byteLength)
-        throw new Error('Datos de geometría incompletos');
-      // Importante: el número de coordenadas es vértices * 3, NO
-      // bytes de posición. El error anterior leía los índices como
-      // posiciones y provocaba la desaparición de todos los carros.
-      const points=new Float32Array(coordinateCount);
-      for(let j=0;j<coordinateCount;j++){
-        points[j]=view.getInt16(cursor.offset+j*2,true)/2048;
-      }
-      cursor.offset+=posBytes;
-      const indices=new Uint16Array(triangles*3);
-      for(let j=0;j<indices.length;j++){
-        const val=view.getUint16(cursor.offset+j*2,true);
-        if(val>=vertices)throw new Error('Índice de carro inválido');
-        indices[j]=val;
-      }
-      cursor.offset+=faceBytes;
-      if(triangles===0)return null;
-      const geometry=new THREE.BufferGeometry();
-      geometry.setAttribute('position',new THREE.BufferAttribute(points,3));
-      geometry.setIndex(new THREE.BufferAttribute(indices,1));
-      geometry.computeVertexNormals();
-      geometry.computeBoundingSphere();
-      return geometry;
-    }
-    function decodePassengerPack(buffer){
-      const view=new DataView(buffer),cursor={offset:0};
-      if(view.byteLength<6 ||
-        view.getUint8(0)!==72||view.getUint8(1)!==80||
-        view.getUint8(2)!==75||view.getUint8(3)!==50){
-        throw new Error('Cabecera de paquete 3D inválida');
-      }
-      cursor.offset=4;
-      const count=view.getUint8(cursor.offset++);
-      if(count!==10)throw new Error('Cantidad de modelos incorrecta');
-      const decoded=[];
-      for(let i=0;i<count;i++){
-        const orientation=view.getUint8(cursor.offset++);
-        const sourceLength=view.getUint16(cursor.offset,true)/100;cursor.offset+=2;
-        const sourceWidth=view.getUint16(cursor.offset,true)/100;cursor.offset+=2;
-        if(orientation>1 || sourceWidth<.5 || sourceLength<1)
-          throw new Error('Dimensiones de modelo inválidas');
-        const pieces=[];
-        for(let j=0;j<3;j++)pieces.push(passengerPartGeometry(view,cursor));
-        decoded.push({name:PASSENGER_NAMES[i],sourceLength,sourceWidth,pieces});
-      }
-      if(cursor.offset!==buffer.byteLength)throw new Error('Paquete 3D con bytes extra');
-      return decoded;
-    }
+
     function makePackedPassengerCar(index){
-      const cached=passengerCarTemplates[index];
-      if(cached){
-        const group=cached.group.clone(true);
-        const rolling=[];
-        group.traverse(obj=>{
-          if(obj.name==='PackCarWheelPivot')rolling.push(obj);
-        });
-        return {
-          group,rolling,wheelRadius:cached.wheelRadius,
-          collisionHalfWidth:cached.collisionHalfWidth,
-          collisionHalfLength:cached.collisionHalfLength,
-          passengerType:cached.passengerType
-        };
-      }
-      const data=passengerMeshes[index];
-      const group=new THREE.Group(),rolling=[];
-      group.name='Carro real optimizado · '+data.name;
-      const [length,width]=passengerSpecs[index];
-      const sx=width/data.sourceWidth,sz=length/data.sourceLength;
-      const parts=[
-        new THREE.MeshStandardMaterial({
-          color:PASSENGER_COLORS[index],roughness:.48,metalness:.19,
-          side:THREE.DoubleSide,flatShading:false
-        }),
-        new THREE.MeshStandardMaterial({
-          color:0x638da4,roughness:.17,metalness:.17,
-          side:THREE.DoubleSide,transparent:true,opacity:.96,
-          depthWrite:true
-        }),
-        new THREE.MeshStandardMaterial({
-          color:0xf5dc9d,roughness:.27,emissive:0x55431d,
-          emissiveIntensity:.23,side:THREE.DoubleSide
-        })
-      ];
-      for(let j=0;j<3;j++){
-        if(!data.pieces[j])continue;
-        const object=new THREE.Mesh(data.pieces[j],parts[j]);
-        object.scale.set(sx,1,sz);
-        object.castShadow=j===0;
-        object.receiveShadow=j===0;
-        group.add(object);
-      }
-      const tireMaterial=new THREE.MeshStandardMaterial({color:0x17191c,roughness:.97});
-      const rimMaterial=new THREE.MeshStandardMaterial({
-        color:0x8a929b,metalness:.57,roughness:.34
+      const template=passengerCarTemplates[index];
+      if(!template)throw new Error('Carro original aún no cargado');
+      // Duplicar solamente los nodos: mallas, materiales y texturas se
+      // comparten en GPU para no duplicar memoria entre partidas.
+      const group=new THREE.Group();
+      const realCar=template.group.clone(true);
+      group.name='Carro original · '+template.name;
+      group.add(realCar);
+      const rolling=[];
+      realCar.traverse(obj=>{
+        if(obj.isMesh && obj.userData.trafficWheel)rolling.push(obj);
       });
-      const axleLength=length*(index===5?.36:.34);
-      const radius=index===4||index===8||index===5?.38:.31;
-      const tireGeo=new THREE.CylinderGeometry(radius,radius,.205,12);
-      const rimGeo=new THREE.CylinderGeometry(radius*.50,radius*.50,.216,10);
-      for(const side of [-1,1])for(const z of [-axleLength,axleLength]){
-        const pivot=new THREE.Group();
-        pivot.name='PackCarWheelPivot';
-        pivot.position.set(side*width*.47,radius,z);
-        const tire=new THREE.Mesh(tireGeo,tireMaterial);
-        tire.rotation.z=Math.PI/2;tire.castShadow=true;pivot.add(tire);
-        const rim=new THREE.Mesh(rimGeo,rimMaterial);
-        rim.rotation.z=Math.PI/2;pivot.add(rim);
-        group.add(pivot);rolling.push(pivot);
-      }
-      const headlightMaterial=new THREE.MeshBasicMaterial({color:0xfff1ca});
-      const tailMaterial=new THREE.MeshBasicMaterial({color:0xff4141});
-      for(const side of [-1,1]){
-        const front=new THREE.Mesh(new THREE.BoxGeometry(.27,.10,.035),headlightMaterial);
-        front.position.set(side*width*.34,.68,length*.50);
-        group.add(front);
-        const back=new THREE.Mesh(new THREE.BoxGeometry(.25,.11,.035),tailMaterial);
-        back.position.set(side*width*.34,.68,-length*.50);
-        group.add(back);
-      }
-      passengerCarTemplates[index]={
-        group,wheelRadius:radius,
-        collisionHalfWidth:width*.5+.22,
-        collisionHalfLength:length*.5+.15,
-        passengerType:data.name
+      return {
+        group,rolling,wheelRadius:template.wheelRadius,
+        collisionHalfWidth:template.collisionHalfWidth,
+        collisionHalfLength:template.collisionHalfLength,
+        passengerType:template.name
       };
-      return makePackedPassengerCar(index);
     }
     function installPassengerVariant(car,variantIndex){
-      if(!passengerMeshes.length)return;
-      const model=makePackedPassengerCar(variantIndex%passengerMeshes.length);
+      if(!passengerCarTemplates.length)return;
+      const chosen=((variantIndex%PASSENGER_NAMES.length)+
+        PASSENGER_NAMES.length)%PASSENGER_NAMES.length;
+      const model=makePackedPassengerCar(chosen);
       model.group.position.copy(car.group.position);
       model.group.rotation.copy(car.group.rotation);
       scene.remove(car.group);
       scene.add(model.group);
       Object.assign(car,model);
-      car.variantIndex=variantIndex%passengerMeshes.length;
+      car.variantIndex=chosen;
       car.isPackPlaceholder=true;
       car.modelReady=true;
       car.group.visible=true;
     }
     async function loadPassengerCarPack(){
       try{
-        if(typeof DecompressionStream!=='function')
-          throw new Error('Se necesita soporte de descompresión nativa');
-        const module=await import('./assets/passenger-pack-hq-v2.js');
-        const bin=Uint8Array.from(atob(module.PASSENGER_PACK_B64),
-          letter=>letter.charCodeAt(0));
-        const bytes=await new Response(
-          new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate'))
-        ).arrayBuffer();
-        const cars=decodePassengerPack(bytes);
-        if(cars.length!==10 || cars.some(car=>!car.pieces[0])){
-          throw new Error('Paquete de vehículos incompleto');
+        if(typeof DecompressionStream!=='function'){
+          throw new Error('Safari no permite descomprimir el paquete 3D');
         }
-        passengerMeshes.push(...cars);
-        // Solo activar cada modelo cuando ha terminado de cargarse.
-        const packSlots=oncomingCars.filter(car=>car.isPackPlaceholder);
-        packSlots.forEach((car,i)=>installPassengerVariant(car,i));
-        nextPassengerVariant=packSlots.length;
+        const response=await fetch(
+          './assets/real-passenger-cars.glb.gz?v=real1'
+        );
+        if(!response.ok){
+          throw new Error('HTTP '+response.status+' al cargar los carros');
+        }
+        if(!response.body)throw new Error('Archivo 3D sin contenido');
+        const bytes=await new Response(
+          response.body.pipeThrough(new DecompressionStream('gzip'))
+        ).arrayBuffer();
+        // GLTFLoader preserva las texturas, normales y UV de cada carro,
+        // cosa que la conversión HPK2 anterior había descartado.
+        const gltf=await new Promise((resolve,reject)=>{
+          loader.parse(bytes,'',resolve,reject);
+        });
+        gltf.scene.updateMatrixWorld(true);
+        const prepared=[];
+        for(const name of PASSENGER_NAMES){
+          const target=new THREE.Group();
+          let parts=0,tires=0;
+          gltf.scene.traverse(obj=>{
+            if(!obj.isMesh || !obj.name.startsWith(name+'_'))return;
+            obj.updateWorldMatrix(true,false);
+            const copy=obj.clone(false);
+            // Conservar la ubicación relativa de ruedas, ventanas y
+            // carrocería incluso si GLTFLoader agrega nodos intermedios.
+            obj.matrixWorld.decompose(
+              copy.position,copy.quaternion,copy.scale
+            );
+            copy.castShadow=/body_body/i.test(obj.name);
+            copy.receiveShadow=copy.castShadow;
+            copy.userData.trafficWheel=/_wheel_|_wheek_/i.test(obj.name);
+            if(copy.userData.trafficWheel)tires++;
+            target.add(copy);parts++;
+          });
+          if(parts<7 || tires!==4){
+            throw new Error('Modelo '+name+' incompleto: '+
+              parts+' piezas, '+tires+' gomas');
+          }
+          target.updateMatrixWorld(true);
+          const bounds=new THREE.Box3().setFromObject(target);
+          const dimensions=bounds.getSize(new THREE.Vector3());
+          if(!Number.isFinite(dimensions.x) || dimensions.x<.8 ||
+             dimensions.x>3.1 || dimensions.z<2.2 || dimensions.z>6){
+            throw new Error('Dimensiones incorrectas en '+name);
+          }
+          // Mover todo el vehículo como un bloque, sin despegar
+          // las ruedas ni alterar su eje de rotación.
+          target.position.y=.018-bounds.min.y;
+          target.updateMatrixWorld(true);
+          prepared.push({
+            name,group:target,
+            wheelRadius:name==='Offroad'||name==='SUV'?.39:.33,
+            collisionHalfWidth:Math.max(1.10,dimensions.x*.5+.16),
+            collisionHalfLength:dimensions.z*.5+.23
+          });
+        }
+        passengerCarTemplates.push(...prepared);
+        // Primero instalar y verificar TODOS los carros, luego
+        // habilitar el inicio de la partida.
+        const slots=oncomingCars.filter(car=>car.isPackPlaceholder);
+        slots.forEach((car,i)=>installPassengerVariant(car,i));
+        nextPassengerVariant=slots.length;
         loadedPassengerPack=true;
         document.getElementById('trafficLoadError').hidden=true;
-        console.info('Carros nuevos cargados desde paquete original:',
-          passengerMeshes.map(c=>c.name).join(', '));
+        console.info('10 vehículos originales listos:',prepared.map(x=>x.name));
       }catch(err){
-        // Si Safari falla al cargar el paquete, NO mostrar carros falsos.
-        console.error('Error al cargar los 10 vehículos del paquete 3D:',err);
+        console.error('Error al cargar modelos originales de carros:',err);
         for(const car of oncomingCars){
           if(car.isPackPlaceholder&&!car.modelReady)car.group.visible=false;
         }
-        // Mostrar un aviso real al usuario para no aparentar tráfico.
-        const trafficError=document.getElementById('trafficLoadError');
-        if(trafficError){
-          trafficError.textContent='No se cargaron los carros 3D. Actualiza la página.';
-          trafficError.hidden=false;
+        const el=document.getElementById('trafficLoadError');
+        if(el){
+          el.textContent='No se cargaron los vehículos 3D originales. Recarga el juego.';
+          el.hidden=false;
         }
-      } finally {
+      }finally{
         initialTrafficReady=true;
-        // Ambas cargas se verifican antes de comenzar.
-        if(pendingStart && initialVehicleReady){
-          pendingStart=false;
-          reset();
+        if(pendingStart&&initialVehicleReady){
+          pendingStart=false;reset();
         }
       }
     }
