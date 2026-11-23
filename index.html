@@ -226,6 +226,22 @@
     #hud .score-pill.extreme{border-color:#ff6b26;box-shadow:0 0 18px #ff9e22b8,0 3px 12px #000a}
     #hud .score-pill.extreme em{color:#ffbe65}
     @media(max-height:440px){#hud .score-pill em{font-size:8px;margin-top:0}}
+
+    /* Efectos de chapitas: puntos emergentes sin bloquear los controles. */
+    #coinPopLayer{position:fixed;inset:0;z-index:34;pointer-events:none;overflow:hidden}
+    .coin-points-popup{position:absolute;transform:translate(-50%,-50%);font-size:clamp(21px,4.2vw,34px);
+      font-weight:1000;font-style:italic;color:#ffec5a;white-space:nowrap;
+      -webkit-text-stroke:1px #805000;text-shadow:0 3px 0 #6a4300,0 0 13px #fff58f,0 5px 16px #000a;
+      animation:coinPointsRise .73s cubic-bezier(.12,.75,.3,1) forwards;will-change:transform,opacity}
+    @keyframes coinPointsRise{
+      0%{opacity:0;transform:translate(-50%,-33%) scale(.55)}
+      18%{opacity:1;transform:translate(-50%,-68%) scale(1.24)}
+      65%{opacity:1}
+      100%{opacity:0;transform:translate(-50%,-205%) scale(.84)}
+    }
+    @media(prefers-reduced-motion:reduce){
+      .coin-points-popup{animation-duration:.28s}
+    }
 </style>
 </head>
 <body>
@@ -238,6 +254,7 @@
 
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
   <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span></div>
+  <div id="coinPopLayer" aria-hidden="true"></div>
   <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
   <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
@@ -1616,6 +1633,7 @@
     // carretera si el jugador la esquiva. Solo desaparece si se recoge.
     // InstancedMesh mantiene el rendimiento incluso en recorridos largos.
     const COIN_POINTS = 25;
+    const COIN_COLLECT_DURATION = .34;
     const COIN_SPACING = 12;
     const COIN_BATCH_SIZE = 128;
     const COIN_LOOKAHEAD = 230;
@@ -1648,6 +1666,135 @@
     const coinCameraMatrix=new THREE.Matrix4();
     const coinBatchBounds=new THREE.Sphere();
     const coinCountEl=document.getElementById('coinCount');
+    // Efecto coleccionable 3D con un único draw call para destellos.
+    // Reutiliza un buffer fijo; no crea nuevas mallas al recoger monedas.
+    const COIN_SPARKLE_CAP=84;
+    const sparklePositions=new Float32Array(COIN_SPARKLE_CAP*3);
+    const sparkleColors=new Float32Array(COIN_SPARKLE_CAP*3);
+    const sparkleLife=new Float32Array(COIN_SPARKLE_CAP);
+    const sparkleMaxLife=new Float32Array(COIN_SPARKLE_CAP);
+    const sparkleVelocity=new Float32Array(COIN_SPARKLE_CAP*3);
+    sparklePositions.fill(-9999);
+    const sparkleGeometry=new THREE.BufferGeometry();
+    sparkleGeometry.setAttribute('position',
+      new THREE.BufferAttribute(sparklePositions,3).setUsage(THREE.DynamicDrawUsage));
+    sparkleGeometry.setAttribute('color',
+      new THREE.BufferAttribute(sparkleColors,3).setUsage(THREE.DynamicDrawUsage));
+    const sparkleMaterial=new THREE.PointsMaterial({
+      size:.19,vertexColors:true,transparent:true,opacity:.96,
+      depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true
+    });
+    const sparkleCloud=new THREE.Points(sparkleGeometry,sparkleMaterial);
+    sparkleCloud.frustumCulled=false;
+    scene.add(sparkleCloud);
+    let nextSparkle=0;
+    function resetCoinSparkles(){
+      sparkleLife.fill(0);
+      sparklePositions.fill(-9999);
+      sparkleColors.fill(0);
+      sparkleGeometry.attributes.position.needsUpdate=true;
+      sparkleGeometry.attributes.color.needsUpdate=true;
+      document.getElementById('coinPopLayer').replaceChildren();
+    }
+    function spawnCoinSparkles(coin){
+      for(let k=0;k<14;k++){
+        const i=nextSparkle++%COIN_SPARKLE_CAP,j=i*3;
+        const a=(k/14)*Math.PI*2+(Math.random()-.5)*.16;
+        const outward=1.1+Math.random()*1.7;
+        sparklePositions[j]=coin.lane+(Math.random()-.5)*.16;
+        sparklePositions[j+1]=1.45+(Math.random()-.5)*.2;
+        sparklePositions[j+2]=-coin.at;
+        sparkleVelocity[j]=Math.cos(a)*outward;
+        sparkleVelocity[j+1]=1.0+Math.random()*1.9;
+        sparkleVelocity[j+2]=Math.sin(a)*outward;
+        sparkleLife[i]=.35+Math.random()*.25;
+        sparkleMaxLife[i]=sparkleLife[i];
+        sparkleColors[j]=1.0;
+        sparkleColors[j+1]=.64+Math.random()*.36;
+        sparkleColors[j+2]=Math.random()>.72?.75:.10;
+      }
+      sparkleGeometry.attributes.position.needsUpdate=true;
+      sparkleGeometry.attributes.color.needsUpdate=true;
+    }
+    function updateCoinSparkles(dt){
+      let dirty=false;
+      for(let i=0;i<COIN_SPARKLE_CAP;i++){
+        if(sparkleLife[i]<=0)continue;
+        const j=i*3;
+        sparkleLife[i]-=dt;
+        if(sparkleLife[i]<=0){
+          sparklePositions[j]=sparklePositions[j+1]=sparklePositions[j+2]=-9999;
+          sparkleColors[j]=sparkleColors[j+1]=sparkleColors[j+2]=0;
+          dirty=true;continue;
+        }
+        const fade=sparkleLife[i]/sparkleMaxLife[i];
+        sparklePositions[j]+=sparkleVelocity[j]*dt;
+        sparklePositions[j+1]+=sparkleVelocity[j+1]*dt;
+        sparklePositions[j+2]+=sparkleVelocity[j+2]*dt;
+        sparkleVelocity[j+1]-=5.0*dt;
+        sparkleColors[j]=fade;
+        sparkleColors[j+1]=fade*.84;
+        sparkleColors[j+2]=fade*.25;
+        dirty=true;
+      }
+      if(dirty){
+        sparkleGeometry.attributes.position.needsUpdate=true;
+        sparkleGeometry.attributes.color.needsUpdate=true;
+      }
+    }
+    const coinPopupLayer=document.getElementById('coinPopLayer');
+    const coinProjection=new THREE.Vector3();
+    function showCoinPoints(coin){
+      if(coinPopupLayer.childElementCount>=8){
+        coinPopupLayer.firstElementChild?.remove();
+      }
+      camera.updateMatrixWorld();
+      coinProjection.set(coin.lane,1.45,-coin.at).project(camera);
+      if(!Number.isFinite(coinProjection.x) || coinProjection.z>1)return;
+      const popup=document.createElement('div');
+      popup.className='coin-points-popup';
+      popup.textContent='+'+COIN_POINTS+' PTS';
+      popup.style.left=Math.max(9,Math.min(91,(coinProjection.x+1)*50))+'%';
+      popup.style.top=Math.max(20,Math.min(79,(1-coinProjection.y)*50))+'%';
+      coinPopupLayer.appendChild(popup);
+      popup.addEventListener('animationend',()=>popup.remove(),{once:true});
+    }
+    // Sin archivos adicionales: una campanita breve sintetizada. El
+    // AudioContext se habilita únicamente con una pulsación del jugador.
+    let coinAudio=null;
+    let lastCoinChime=-1;
+    function unlockCoinAudio(){
+      try{
+        const AudioClass=window.AudioContext||window.webkitAudioContext;
+        if(!AudioClass)return;
+        if(!coinAudio)coinAudio=new AudioClass();
+        if(coinAudio.state==='suspended'){
+          const resumed=coinAudio.resume();
+          if(resumed&&resumed.catch)resumed.catch(()=>{});
+        }
+      }catch(err){console.info('Audio de chapitas no disponible',err);}
+    }
+    function playCoinChime(){
+      if(!coinAudio||coinAudio.state!=='running')return;
+      try{
+        const now=coinAudio.currentTime;
+        if(now-lastCoinChime<.075)return;
+        lastCoinChime=now;
+        for(const [frequency,delay] of [[870,0],[1320,.055]]){
+          const osc=coinAudio.createOscillator();
+          const gain=coinAudio.createGain();
+          osc.type='sine';
+          osc.frequency.setValueAtTime(frequency,now+delay);
+          osc.frequency.exponentialRampToValueAtTime(frequency*1.12,now+delay+.11);
+          gain.gain.setValueAtTime(.0001,now+delay);
+          gain.gain.exponentialRampToValueAtTime(.025,now+delay+.014);
+          gain.gain.exponentialRampToValueAtTime(.0001,now+delay+.17);
+          osc.connect(gain);gain.connect(coinAudio.destination);
+          osc.start(now+delay);osc.stop(now+delay+.18);
+          osc.onended=()=>{osc.disconnect();gain.disconnect();};
+        }
+      }catch(err){console.info('Sonido de chapita omitido',err);}
+    }
     let coinCount=0;
     let nextCoinAt=24;
 
@@ -1667,10 +1814,22 @@
       coinBatches.push(batch);
       return batch;
     }
-    function setCoinTransform(coin,angle,hover){
-      coinDummy.position.set(coin.lane,1.45+hover,-coin.at);
-      coinDummy.rotation.set(0,angle,0);
-      coinDummy.scale.setScalar(coin.collected?0.000001:1);
+    function setCoinTransform(coin,angle,hover,pickupProgress=null){
+      if(pickupProgress!==null){
+        const eased=1-Math.pow(1-pickupProgress,3);
+        coinDummy.position.set(
+          THREE.MathUtils.lerp(coin.lane,rider.position.x,eased),
+          THREE.MathUtils.lerp(1.45,1.08,eased)+
+            Math.sin(Math.PI*pickupProgress)*.55,
+          THREE.MathUtils.lerp(-coin.at,rider.position.z-.30,eased)
+        );
+        coinDummy.scale.setScalar(Math.max(.000001,1-eased*.99));
+        coinDummy.rotation.set(0,angle+pickupProgress*Math.PI*5,0);
+      }else{
+        coinDummy.position.set(coin.lane,1.45+hover,-coin.at);
+        coinDummy.rotation.set(0,angle,0);
+        coinDummy.scale.setScalar(coin.collected?.000001:1);
+      }
       coinDummy.updateMatrix();
       for(const mesh of coin.batch.meshes){
         mesh.setMatrixAt(coin.slot,coinDummy.matrix);
@@ -1683,7 +1842,7 @@
       const i=coins.length;
       const coin={
         at,lane:i%7<4?-.92:1.15,
-        batch,slot:batch.count,collected:false
+        batch,slot:batch.count,collected:false,pickupTime:null
       };
       batch.count++;
       batch.lastAt=at;
@@ -1708,6 +1867,7 @@
       coins.length=0;
       coinCount=0;
       coinCountEl.textContent='0';
+      resetCoinSparkles();
       nextCoinAt=24;
       ensureCoinsAhead(0);
     }
@@ -1720,16 +1880,33 @@
         const coin=coins[i];
         const ahead=coin.at-distance;
         if(ahead>COIN_LOOKAHEAD+10)break;
-        if(coin.collected)continue;
+        if(coin.collected){
+          // Solo desaparece después de volar hacia el FourTrax.
+          if(coin.pickupTime!==null){
+            coin.pickupTime=Math.min(COIN_COLLECT_DURATION,coin.pickupTime+dt);
+            const p=coin.pickupTime/COIN_COLLECT_DURATION;
+            setCoinTransform(coin,rivalClock*3.3,0,p);
+            if(p>=1){
+              coin.pickupTime=null;
+              setCoinTransform(coin,0,0);
+            }
+          }
+          continue;
+        }
         if(active && !paused &&
           Math.abs(ahead)<1.6 &&
           Math.abs(rider.position.x-coin.lane)<1.05){
           coin.collected=true;
+          coin.pickupTime=0;
           coinCount++;
           coinCountEl.textContent=String(coinCount);
           score+=COIN_POINTS;
           scoreEl.textContent=formatScore(score);
-          setCoinTransform(coin,0,0);
+          // Recompensa instantánea, con animación 3D visual por .34 s.
+          spawnCoinSparkles(coin);
+          showCoinPoints(coin);
+          playCoinChime();
+          setCoinTransform(coin,rivalClock*2.6,0,0);
           const badge=document.getElementById('coinBadge');
           badge.classList.remove('collected');
           void badge.offsetWidth;
@@ -1740,6 +1917,7 @@
         const bob=Math.sin(rivalClock*2+coin.at*.1)*.18;
         setCoinTransform(coin,rivalClock*2.6+coin.at*.10,bob);
       }
+      updateCoinSparkles(dt);
       // Culling visual por cámara (NO por distancia arbitraria):
       // mantener visibles las chapitas no recogidas hasta que realmente
       // salgan del encuadre. Sus coordenadas originales se conservan.
@@ -1886,7 +2064,7 @@
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
     }
-    startBtn.addEventListener('click', reset);
+    startBtn.addEventListener('click',()=>{unlockCoinAudio();reset();});
 
     function finish(reason = 'normal') {
       if (!active) return;
