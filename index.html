@@ -1315,8 +1315,131 @@
       }
       return {group,rolling,isBus:true};
     }
-    for(let i=0;i<5;i++){
-      const model = i===4 ? makeOncomingBus() : makeOncomingCar(vehiclePaints[i]);
+
+    // Camioneta clásica setentera basada en las proporciones y colores
+    // del modelo proporcionado (1970-truck.zip, COLLADA).
+    // Recreación optimizada para móviles: sin descargar 32 MB de texturas.
+    // La trompa del tráfico mira a +Z (hacia el jugador).
+    function makeVintage1970Truck(){
+      const group=new THREE.Group(),rolling=[];
+      group.name='Camioneta clásica 1970 · tráfico';
+      const orange=mat(0xc95b30,.43),orangeLight=mat(0xe7773d,.46);
+      const cream=mat(0xe7d4be,.66),chrome=new THREE.MeshStandardMaterial({
+        color:0xbac6cd,metalness:.68,roughness:.26
+      });
+      const black=mat(0x20242a,.92),rubber=mat(0x17191c,.99);
+      const glass=new THREE.MeshStandardMaterial({
+        color:0x557789,metalness:.18,roughness:.2,
+        transparent:true,opacity:.90,side:THREE.DoubleSide
+      });
+      const lamps=new THREE.MeshBasicMaterial({color:0xfff3c7});
+      const amber=new THREE.MeshBasicMaterial({color:0xffbd51});
+      const backLamp=new THREE.MeshBasicMaterial({color:0xf13d38});
+      const box=(w,h,d,x,y,z,material)=>{
+        const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+        m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;
+        group.add(m);return m;
+      };
+      // Una carrocería extruida representa mejor las formas de la
+      // camioneta original que un cubo; perfil con capó y parabrisas.
+      function silhouette(outline,halfWidth,material){
+        const verts=[],idx=[],N=outline.length;
+        for(const x of [-halfWidth,halfWidth])
+          for(const p of outline)verts.push(x,p[1],p[0]);
+        for(let k=1;k<N-1;k++){
+          idx.push(0,k,k+1,N,N+k+1,N+k);
+        }
+        for(let i=0;i<N;i++){
+          const j=(i+1)%N;
+          idx.push(i,j,N+j,i,N+j,N+i);
+        }
+        const geometry=new THREE.BufferGeometry();
+        geometry.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+        geometry.setIndex(idx);geometry.computeVertexNormals();
+        const shell=new THREE.Mesh(geometry,material);
+        shell.castShadow=true;shell.receiveShadow=true;
+        group.add(shell);return shell;
+      }
+      silhouette([
+        [-2.54,.57],[2.44,.57],[2.55,.76],[2.54,1.18],
+        [1.62,1.36],[1.07,2.19],[.82,2.35],
+        [-2.32,2.35],[-2.54,2.12]
+      ],1.02,orange);
+      // Capó, techo crema y molduras originales del vehículo escaneado.
+      box(1.92,.10,.84,0,1.32,2.02,orangeLight);
+      box(1.88,.09,3.00,0,2.37,-.73,orangeLight);
+      for(const side of [-1,1]){
+        box(.05,.14,4.15,side*1.049,1.16,-.13,cream);
+        box(.064,.045,3.18,side*1.062,1.45,-.70,chrome);
+        box(.12,.05,3.10,side*.81,2.47,-.64,black);
+        box(.20,.06,.66,side*1.10,.77,1.05,chrome);
+        // Ventanas laterales y sus separadores verticales.
+        for(const [z,len] of [[-1.72,.82],[-.75,.83],[.22,.76]]){
+          box(.025,.43,len,side*1.066,1.89,z,glass);
+          box(.035,.48,.05,side*1.086,1.89,z-len/2,black);
+        }
+        const doorGlass=box(.026,.41,.49,side*1.068,1.81,1.05,glass);
+        doorGlass.rotation.x=-.22;
+        box(.05,.06,.22,side*1.085,1.41,1.05,chrome);
+        // Espejos exteriores con soporte cromado.
+        box(.26,.08,.09,side*1.21,1.58,1.30,chrome);
+        box(.16,.25,.11,side*1.29,1.68,1.31,black);
+      }
+      // Parabrisas inclinado: cuadrilátero orientado en el eje Z.
+      function pane(corners,material){
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position',new THREE.Float32BufferAttribute(corners.flat(),3));
+        geo.setIndex([0,1,2,0,2,3]);geo.computeVertexNormals();
+        const m=new THREE.Mesh(geo,material);m.castShadow=false;group.add(m);
+      }
+      pane([[-.89,1.63,1.57],[.89,1.63,1.57],
+        [.89,2.20,1.078],[-.89,2.20,1.078]],glass);
+      box(1.94,.055,.08,0,2.19,1.06,chrome);
+      // Frontal: parrilla, faros dobles y paragolpes.
+      box(1.30,.38,.075,0,1.04,2.565,chrome);
+      for(let k=-4;k<=4;k++)box(.045,.27,.09,k*.135,1.04,2.625,black);
+      const headlightGeo=new THREE.CylinderGeometry(.115,.115,.07,12);
+      for(const x of [-.80,.80]){
+        const lamp=new THREE.Mesh(headlightGeo,lamps);
+        lamp.rotation.x=Math.PI/2;lamp.position.set(x,1.10,2.618);
+        group.add(lamp);
+        box(.15,.07,.055,x,.88,2.625,amber);
+      }
+      box(2.30,.15,.30,0,.63,2.65,chrome);
+      box(2.30,.15,.30,0,.63,-2.62,chrome);
+      // Ventanas y luces de las puertas posteriores.
+      for(const x of [-.53,.53]){
+        box(.79,.37,.042,x,1.85,-2.558,glass);
+        box(.11,.17,.055,x>.0?.93:-.93,.95,-2.569,backLamp);
+        box(.044,.78,.055,0,1.50,-2.56,cream);
+      }
+      for(const z of [-1.62,1.57])for(const side of [-1,1]){
+        // Gomas separadas para que roten con el tráfico.
+        const pivot=new THREE.Group();
+        pivot.position.set(side*1.02,.40,z);
+        const tyre=new THREE.Mesh(new THREE.CylinderGeometry(.39,.39,.26,16),rubber);
+        tyre.rotation.z=Math.PI/2;tyre.castShadow=true;pivot.add(tyre);
+        const wheelFace=new THREE.Mesh(new THREE.CylinderGeometry(.205,.205,.28,12),chrome);
+        wheelFace.rotation.z=Math.PI/2;pivot.add(wheelFace);
+        const cap=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.295,10),black);
+        cap.rotation.z=Math.PI/2;pivot.add(cap);
+        group.add(pivot);rolling.push(pivot);
+        const fender=new THREE.Mesh(new THREE.TorusGeometry(.425,.052,7,16,Math.PI),
+          orangeLight);
+        fender.rotation.y=Math.PI/2;
+        fender.position.set(side*1.055,.41,z);
+        group.add(fender);
+      }
+      // Luces de techo características y matrícula trasera.
+      for(const x of [-.65,0,.65])box(.16,.075,.15,x,2.47,.77,amber);
+      box(.46,.14,.025,0,.75,-2.64,black);
+      return {group,rolling,isTruck:true,wheelRadius:.39};
+    }
+
+    for(let i=0;i<6;i++){
+      // 4 carros normales, una camioneta 1970 y el autobús.
+      const model = i===5 ? makeOncomingBus() :
+        i===4 ? makeVintage1970Truck() : makeOncomingCar(vehiclePaints[i]);
       scene.add(model.group);
       oncomingCars.push({ ...model, ahead:0, speed:0, lane:0 });
     }
@@ -1325,7 +1448,9 @@
     const carLanes = [-3.45,3.45];
     function resetOncomingCars(){
       oncomingCars.forEach((car,i)=>{
-        car.ahead=i===4 ? 101+Math.random()*22 : 54 + i*39 + i*i*2 + Math.random()*12;
+        car.ahead=i===5 ? 214+Math.random()*18 :
+          i===4 ? 125+Math.random()*13 :
+          54+i*41+i*i*2+Math.random()*10;
         car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
         car.lane=carLanes[(i+Math.floor(Math.random()*carLanes.length))%carLanes.length];
         car.group.position.set(car.lane,0,-car.ahead);
@@ -1343,10 +1468,13 @@
           car.speed=8+Math.random()*10;
         }
         car.group.position.set(car.lane,0,rider.position.z-car.ahead);
-        for(const tire of car.rolling)tire.rotation.x+=car.speed*dt/.30;
+        for(const tire of car.rolling)
+          tire.rotation.x+=car.speed*dt/(car.wheelRadius||.30);
         if(car.ahead > 0)nearest=Math.min(nearest,car.ahead);
-        if(car.ahead > (car.isBus?-3.0:-1.9) && car.ahead < (car.isBus?3.0:1.9) &&
-          Math.abs(car.lane-rider.position.x)<(car.isBus?1.85:1.57)) {
+        const length=car.isBus?3.0:car.isTruck?2.75:1.9;
+        const width=car.isBus?1.85:car.isTruck?1.87:1.57;
+        if(car.ahead>-length && car.ahead<length &&
+          Math.abs(car.lane-rider.position.x)<width) {
           finish('traffic');return;
         }
       }
@@ -1533,7 +1661,7 @@
         if(encounter>4.3)continue;
         const predicted=atTime(encounter);
         const clearance=Math.abs(predicted-car.lane);
-        const safeWidth=car.isBus?1.95:1.71;
+        const safeWidth=car.isBus?1.95:car.isTruck?1.94:1.71;
         // Penalización alta por colisión prevista en el momento del cruce.
         if(clearance<safeWidth){
           risk+=1100+(4.3-encounter)*110;
