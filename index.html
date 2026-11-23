@@ -484,10 +484,8 @@
       const frontHeight=obstacleHeightAt(rider.position.z-vehicleLength*.35,rider.position.x);
       const rearHeight=obstacleHeightAt(rider.position.z+rearAxleZ*.9,rider.position.x);
       const surfaceHeight=Math.max(frontHeight,rearHeight);
-      surfaceContactHeight=surfaceHeight;
-      // La inclinación del wheelie no debe inventar separación del suelo.
-      // La altura final se resuelve contra las gomas en keepVehicleAboveRoad().
-      rider.position.y=THREE.MathUtils.damp(rider.position.y,surfaceHeight,12,dt);
+      // Con wheelie se apoya atrás. La altura se resuelve solo UNA vez.
+      surfaceContactHeight=tilt>.18?rearHeight:surfaceHeight;
       // El badén desestabiliza el wheelie, más notable a velocidad alta.
       if(surfaceHeight>.04)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
       for(const o of obstacles){
@@ -526,6 +524,11 @@
     let vehicleLength = 1.85;
     let rearAxleZ = 0.75;
     let bodyClearance = 0.18;
+    let rearAxleY = .40;
+    let rearContactWheels = [];
+    let frontSteeringWheels = [];
+    let steerVelocity = 0;
+    let visibleWheelSteer = 0;
     let avatar = null;
     let customRider=null;
     let customRiderClock=0;
@@ -533,6 +536,8 @@
     function clearVehicle() {
       while (vehicle.children.length) vehicle.remove(vehicle.children[0]);
       importedWheelGroups = [];
+      rearContactWheels = [];
+      frontSteeringWheels = [];
       realTireRotation = null;
     }
 
@@ -756,6 +761,7 @@
       vehicleLength = 1.7;
       rearAxleZ = 0.72;
       bodyClearance = 0.015;
+      rearAxleY = .45;
       modelLoaded = false;
     }
 
@@ -829,8 +835,10 @@
         tmpBox.setFromObject(model);
         tmpBox.getSize(tmpSize);
       }
-      // Forzar que mire hacia el frente de la carretera.
-      model.rotation.y += Math.PI;
+      // El giro del Honda NO corresponde al Yamaha: producía el ATV al revés.
+      if(model.userData.vehicleType!=='yamaha-raptor'){
+        model.rotation.y += Math.PI;
+      }
       model.updateMatrixWorld(true);
       tmpBox.setFromObject(model);
       tmpBox.getSize(tmpSize);
@@ -859,22 +867,41 @@
       rearAxleZ = tmpSize.z * 0.33;
       bodyClearance = lift;
 
-      // El Yamaha Raptor llega con las 4 gomas como mallas independientes,
-      // centradas sobre cada eje: la animación gira la goma original.
-      importedWheelGroups = [];
+      // Los ejes del Yamaha están separados y centrados dentro del GLB.
+      // Ordenarlos por ubicación (en pista -Z = frente), no por sus nombres.
+      importedWheelGroups=[];
+      rearContactWheels=[];
+      frontSteeringWheels=[];
       if(model.userData.vehicleType==='yamaha-raptor'){
         model.traverse(obj=>{
           if(obj.isMesh && /^YamahaWheel_(Front|Rear)_[LR]$/.test(obj.name)){
             importedWheelGroups.push(obj);
           }
         });
-        realTireRotation = null;
-        if(importedWheelGroups.length!==4){
-          console.warn('Yamaha Raptor: ruedas identificadas:',importedWheelGroups.length);
+        realTireRotation=null;
+        model.updateWorldMatrix(true,true);
+        const wheelData=importedWheelGroups.map(mesh=>{
+          const pos=mesh.getWorldPosition(new THREE.Vector3());
+          // Medir radio UNA vez, antes de animar: previene saltos por AABB.
+          const bb=new THREE.Box3().setFromObject(mesh);
+          const radius=Math.max(.12,bb.getSize(new THREE.Vector3()).y*.5);
+          mesh.rotation.order='YXZ';
+          return {mesh,pos,radius};
+        }).sort((a,b)=>a.pos.z-b.pos.z);
+        if(wheelData.length===4){
+          frontSteeringWheels=wheelData.slice(0,2).map(d=>d.mesh);
+          rearContactWheels=wheelData.slice(2).map(d=>({mesh:d.mesh,radius:d.radius}));
+          const rearWorld=rearContactWheels.map(d=>d.mesh.getWorldPosition(new THREE.Vector3()));
+          rearAxleZ=(rearWorld[0].z+rearWorld[1].z)*.5-rider.position.z;
+          rearAxleY=(rearWorld[0].y+rearWorld[1].y)*.5-rider.position.y;
+        }else{
+          console.warn('No se identificaron cuatro ruedas Yamaha:',wheelData.length);
+          rearAxleY=.40;
         }
-      } else {
-        // Mantener compatibilidad con el antiguo modelo Honda GLB.
+      }else{
+        // Respaldo Honda.
         enableOriginalTireRotation(model);
+        rearAxleY=bodyClearance+.17;
       }
     }
 
@@ -1446,14 +1473,15 @@
       crashKind = '';
       crashFallProgress = 0;
       resetOncomingCars();
-      lateralMotion = 0;setSteer(0);
+      lateralMotion = 0;steerVelocity=0;visibleWheelSteer=0;setSteer(0);
+      rider.rotation.set(0,0,0);
       positionObstacles(0);
       surfaceContactHeight=0;
       warnEl.classList.remove('visible');
       wasWheelie = false;
       rider.position.set(0, 0, 0);
-      rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
-      vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
+      rearPivot.position.set(0, rearAxleY, rearAxleZ);
+      vehicle.position.set(0, -rearAxleY, -rearAxleZ);
       rearPivot.rotation.set(0, 0, 0);
       if(avatarRig){avatarRig.rideClock=0;avatarRig.hips.rotation.set(0,0,0);avatarRig.torso.rotation.set(0,0,0);avatarRig.neck.rotation.set(0,0,0);}
       customRiderClock=0;
@@ -1545,18 +1573,22 @@
     }
 
     function keepVehicleAboveRoad() {
-      // Medir el FourTrax (no la cabeza/manos del avatar): sus gomas
-      // determinan el apoyo en el suelo durante el wheelie.
-      rider.updateWorldMatrix(true, true);
-      tmpBox.setFromObject(importedModel || vehicle);
-      const minY=tmpBox.min.y;
+      rider.updateWorldMatrix(true,true);
+      const contactY=surfaceContactHeight+.014;
+      let minY;
+      if(rearContactWheels.length===2){
+        // Contacto estable usando centro/radio de ambas gomas traseras.
+        // No depende de la bounding box de mallas que están girando.
+        minY=Math.min(...rearContactWheels.map(({mesh,radius})=>
+          mesh.getWorldPosition(new THREE.Vector3()).y-radius));
+      }else{
+        tmpBox.setFromObject(importedModel || vehicle);
+        minY=tmpBox.min.y;
+      }
       if(!Number.isFinite(minY))return;
-      const contactY=surfaceContactHeight+0.015;
-      // Corregir EN AMBOS SENTIDOS. Antes solo subía el vehículo si se
-      // hundía: cuando quedaba a 20 cm de la brea permanecía flotando.
       const delta=contactY-minY;
-      if(Math.abs(delta)>0.002){
-        rider.position.y+=THREE.MathUtils.clamp(delta,-0.35,0.35);
+      if(Math.abs(delta)>.001){
+        rider.position.y+=delta;
         rider.updateWorldMatrix(true,true);
       }
     }
@@ -1569,11 +1601,14 @@
       if (active && !paused) {
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
         distance += speed * dt;
-        const targetSteer=steerValue || keyboardSteer;
-        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,6,dt);
-        rider.position.x=THREE.MathUtils.clamp(rider.position.x+lateralMotion*dt*(2.2+speed*.13),-4.6,4.6);
-        rider.rotation.y=-lateralMotion*.14;
-        rider.rotation.z=-lateralMotion*.045;
+        const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
+        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,5,dt);
+        // Velocidad lateral amortiguada para una respuesta progresiva.
+        const desiredSideSpeed=lateralMotion*(2.1+speed*.11);
+        steerVelocity=THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,8,dt);
+        rider.position.x=THREE.MathUtils.clamp(rider.position.x+steerVelocity*dt,-4.6,4.6);
+        rider.rotation.y=THREE.MathUtils.damp(rider.rotation.y,-lateralMotion*.115,6,dt);
+        rider.rotation.z=THREE.MathUtils.damp(rider.rotation.z,-lateralMotion*.06,6,dt);
 
         // Un solo GAS: acelerar aumenta progresivamente el ángulo.
         // Si se mantiene presionado, el centro de masa se va hacia atrás:
@@ -1615,9 +1650,13 @@
         }
 
         wheelSpin = (wheelSpin + speed * dt / 0.33) % (Math.PI * 2);
-        // Las cuatro gomas texturizadas del modelo real giran juntas.
+        // Gomas con giro longitudinal y giro de las delanteras al virar.
         if (realTireRotation) realTireRotation.value = wheelSpin;
-        for (const w of importedWheelGroups) w.rotation.x = wheelSpin;
+        visibleWheelSteer=THREE.MathUtils.damp(visibleWheelSteer,lateralMotion*.28,7,dt);
+        for (const w of importedWheelGroups) {
+          w.rotation.x=wheelSpin;
+          w.rotation.y=frontSteeringWheels.includes(w)?visibleWheelSteer:0;
+        }
 
         timeEl.textContent = elapsed.toFixed(2) + ' s';
         angleEl.textContent = Math.max(0, tilt * 180 / Math.PI).toFixed(0) + '°';
@@ -1626,8 +1665,8 @@
         rider.position.z = -distance;
         updateObstacleGameplay(dt);
         updateOncomingTraffic(dt);
-        rearPivot.position.set(0, bodyClearance + 0.17, rearAxleZ);
-        vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
+        rearPivot.position.set(0, rearAxleY, rearAxleZ);
+        vehicle.position.set(0, -rearAxleY, -rearAxleZ);
         rearPivot.rotation.x = tilt;
         updateAvatarAnimation(dt);
         animateCustomRider(dt);
