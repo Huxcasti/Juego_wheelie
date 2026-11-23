@@ -527,6 +527,8 @@
     let rearAxleZ = 0.75;
     let bodyClearance = 0.18;
     let avatar = null;
+    let customRider=null;
+    let customRiderClock=0;
 
     function clearVehicle() {
       while (vehicle.children.length) vehicle.remove(vehicle.children[0]);
@@ -646,7 +648,7 @@
 
     function updateAvatarAnimation(dt) {
       const rig=avatarRig;
-      if(!rig || !rig.person.parent) return;
+      if(!rig || !rig.person.parent || !rig.person.visible)return;
       rig.rideClock+=dt;
       const phase=rig.rideClock;
       const accelerating=active && !paused;
@@ -710,6 +712,8 @@
     function attachAvatar(){
       if(!avatar)avatar=createAvatar();
       vehicle.add(avatar);
+      avatar.visible=!customRider;
+      if(customRider)vehicle.add(customRider);
     }
 
     function buildFallbackATV() {
@@ -757,11 +761,63 @@
 
     buildFallbackATV();
 
+    // El usuario proporcionó un escaneo 3D en ZIP.
+    // Este modelo ya viene optimizado y con brazos/piernas en postura de conductor.
+    // No tiene huesos: usa inclinación procedural del cuerpo completo.
+    function animateCustomRider(dt){
+      if(!customRider || paused)return;
+      customRiderClock+=dt;
+      const moving=active?THREE.MathUtils.clamp(speed/22,0,1):0;
+      const wheelie=active?THREE.MathUtils.clamp(tilt/1.5,0,1):0;
+      const steer=active?lateralMotion:0;
+      const bump=Math.sin(customRiderClock*(5+moving*9))*.010*moving;
+      customRider.position.y=THREE.MathUtils.damp(customRider.position.y,1.31+bump,10,dt);
+      customRider.rotation.x=THREE.MathUtils.damp(customRider.rotation.x,-wheelie*.23-moving*.045,7,dt);
+      customRider.rotation.z=THREE.MathUtils.damp(customRider.rotation.z,-steer*.14,7,dt);
+      customRider.rotation.y=THREE.MathUtils.damp(customRider.rotation.y,-steer*.055,7,dt);
+    }
+    function installCustomRider(sceneModel){
+      const root=new THREE.Group();
+      root.name='Conductor 3D aportado por el usuario';
+      root.position.set(0,1.31,.10);
+      // El escaneo apunta a +Z y el FourTrax mira hacia -Z.
+      sceneModel.rotation.y=Math.PI;
+      sceneModel.scale.setScalar(1.12);
+      sceneModel.traverse(obj=>{
+        if(obj.isMesh){
+          obj.castShadow=true;
+          obj.receiveShadow=true;
+          const ms=Array.isArray(obj.material)?obj.material:[obj.material];
+          for(const m of ms){
+            m.side=THREE.DoubleSide;
+            if(m.map)m.map.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+          }
+        }
+      });
+      root.add(sceneModel);
+      if(customRider?.parent)customRider.parent.remove(customRider);
+      customRider=root;
+      vehicle.add(root);
+      if(avatar)avatar.visible=false;
+    }
+    async function loadCustomRider(){
+      try {
+        const gltf=await new Promise((resolve,reject)=>{
+          loader.load('./assets/new-person-rider.glb',resolve,undefined,reject);
+        });
+        installCustomRider(gltf.scene);
+      } catch(error) {
+        console.warn('Modelo de persona no disponible; se usa conductor alternativo.',error);
+        if(avatar)avatar.visible=true;
+      }
+    }
+
     const loader = new GLTFLoader();
     const tmpBox = new THREE.Box3();
     const tmpSize = new THREE.Vector3();
     const tmpCenter = new THREE.Vector3();
     const modelStatus = document.getElementById('modelStatus');
+    loadCustomRider();
 
     function normalizeImportedModel(model) {
       model.updateMatrixWorld(true);
@@ -1378,6 +1434,8 @@
       vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
       rearPivot.rotation.set(0, 0, 0);
       if(avatarRig){avatarRig.rideClock=0;avatarRig.hips.rotation.set(0,0,0);avatarRig.torso.rotation.set(0,0,0);avatarRig.neck.rotation.set(0,0,0);}
+      customRiderClock=0;
+      if(customRider){customRider.position.set(0,1.31,.10);customRider.rotation.set(0,0,0);}
       messageEl.textContent = '¡ACELERA!';
       startBtn.hidden = true;
     }
@@ -1550,11 +1608,12 @@
         vehicle.position.set(0, -(bodyClearance + 0.17), -rearAxleZ);
         rearPivot.rotation.x = tilt;
         updateAvatarAnimation(dt);
+        animateCustomRider(dt);
         keepVehicleAboveRoad();
         updateContactShadows();
         updateRoadWrap();
       }
-      if(!paused){if(!active){updateAvatarAnimation(dt);updateContactShadows();}updateRival(dt);updateCoins(dt);}
+      if(!paused){if(!active){updateAvatarAnimation(dt);animateCustomRider(dt);updateContactShadows();}updateRival(dt);updateCoins(dt);}
 
       // Animación breve tras pasarse del punto de equilibrio.
       if(!active && crashKind==='backflip' && crashFallProgress < 1){
