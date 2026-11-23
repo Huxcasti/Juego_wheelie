@@ -245,7 +245,7 @@
   <button id="start">COMENZAR</button>
 
   <div id="modelPicker">
-    <button id="pickModel" type="button">📂 CARGAR HONDA FOURTRAX 3D</button>
+    <button id="pickModel" type="button">📂 CARGAR FOURTRACK 3D</button>
     <span id="modelStatus">Modelo 3D: pendiente</span>
     <input id="modelFile" type="file" accept=".glb,model/gltf-binary" hidden>
   </div>
@@ -859,10 +859,23 @@
       rearAxleZ = tmpSize.z * 0.33;
       bodyClearance = lift;
 
-      // No colocar neumáticos artificiales encima de las gomas del Honda.
-      // En el GLB original todos los neumáticos forman parte de una sola malla.
+      // El Yamaha Raptor llega con las 4 gomas como mallas independientes,
+      // centradas sobre cada eje: la animación gira la goma original.
       importedWheelGroups = [];
-      enableOriginalTireRotation(model);
+      if(model.userData.vehicleType==='yamaha-raptor'){
+        model.traverse(obj=>{
+          if(obj.isMesh && /^YamahaWheel_(Front|Rear)_[LR]$/.test(obj.name)){
+            importedWheelGroups.push(obj);
+          }
+        });
+        realTireRotation = null;
+        if(importedWheelGroups.length!==4){
+          console.warn('Yamaha Raptor: ruedas identificadas:',importedWheelGroups.length);
+        }
+      } else {
+        // Mantener compatibilidad con el antiguo modelo Honda GLB.
+        enableOriginalTireRotation(model);
+      }
     }
 
 
@@ -928,7 +941,8 @@
       normalizeImportedModel(importedModel);
       attachAvatar();
       modelLoaded = true;
-      modelStatus.textContent = '✓ HONDA FOURTRAX 3D CARGADO';
+      modelStatus.textContent = importedModel.userData.vehicleType==='yamaha-raptor' ?
+        '✓ YAMAHA RAPTOR 3D CARGADO' : '✓ FOURTRACK 3D CARGADO';
     }
 
     function loadFourtrax(source) {
@@ -937,6 +951,10 @@
         loader.load(temp || source, gltf => {
           if (temp) URL.revokeObjectURL(temp);
           try {
+            const sourceName=typeof source==='string' ? source : source?.name || '';
+            if(/yamaha-raptor/i.test(sourceName)){
+              gltf.scene.userData.vehicleType='yamaha-raptor';
+            }
             useFourtrax(gltf.scene);
             resolve();
           } catch (err) { reject(err); }
@@ -994,9 +1012,13 @@
     });
 
     (async () => {
-      try { await loadFourtrax('./assets/3d-honda-fourtrax-atv.glb'); return; } catch (err) { console.info('Archivo remoto aún no cargado.', err); }
+      // Vehículo principal: Yamaha Raptor optimizado y con ruedas animadas.
+      try { await loadFourtrax('./assets/yamaha-raptor.glb'); return; }
+      catch (err) { console.warn('No se pudo cargar el Yamaha Raptor, usando respaldo.',err); }
+      try { await loadFourtrax('./assets/3d-honda-fourtrax-atv.glb'); return; }
+      catch (err) { console.warn('No hay modelo de respaldo.',err); }
       try { const saved = await savedModelFile(); if (saved) { await loadFourtrax(saved); return; } } catch (err) { console.info('Sin modelo guardado.', err); }
-      modelStatus.textContent = 'Elige el Honda Fourtrax .glb para usarlo';
+      modelStatus.textContent = 'No se pudo cargar el vehículo 3D';
     })();
 
 
