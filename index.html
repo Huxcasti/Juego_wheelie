@@ -286,6 +286,7 @@
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
   <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/24</span></div>
   <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 336 m</div>
+  <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
   <div id="coinPopLayer" aria-hidden="true"></div>
   <a id="bus3DCredit" href="https://sketchfab.com/3d-models/autobus-abco-852a63f852584448a49d643ae944506e"
      target="_blank" rel="noopener noreferrer" title="Modelo Autobus ABCO (CC BY 4.0)">
@@ -1233,7 +1234,7 @@
         modelStatus.textContent='Vehículo provisional listo';
       } finally {
         initialVehicleReady=true;
-        if(pendingStart){
+        if(pendingStart && initialTrafficReady){
           pendingStart=false;
           reset();
         }
@@ -1463,6 +1464,7 @@
     // acumulación de memoria en partidas largas de Safari móvil.
     const passengerCarTemplates=[];
     let loadedPassengerPack=false;
+    let initialTrafficReady=false;
     let nextPassengerVariant=0;
     function passengerPartGeometry(view,cursor){
       if(cursor.offset+4>view.byteLength)throw new Error('Carro incompleto');
@@ -1470,11 +1472,15 @@
       const triangles=view.getUint16(cursor.offset+2,true);
       cursor.offset+=4;
       // HPK2: posición xyz en int16 (0.49 mm), en vez de int8.
-      const posBytes=vertices*6,faceBytes=triangles*6;
+      const coordinateCount=vertices*3;
+      const posBytes=coordinateCount*2,faceBytes=triangles*3*2;
       if(cursor.offset+posBytes+faceBytes>view.byteLength)
         throw new Error('Datos de geometría incompletos');
-      const points=new Float32Array(posBytes);
-      for(let j=0;j<posBytes;j++){
+      // Importante: el número de coordenadas es vértices * 3, NO
+      // bytes de posición. El error anterior leía los índices como
+      // posiciones y provocaba la desaparición de todos los carros.
+      const points=new Float32Array(coordinateCount);
+      for(let j=0;j<coordinateCount;j++){
         points[j]=view.getInt16(cursor.offset+j*2,true)/2048;
       }
       cursor.offset+=posBytes;
@@ -1620,19 +1626,36 @@
           new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate'))
         ).arrayBuffer();
         const cars=decodePassengerPack(bytes);
+        if(cars.length!==10 || cars.some(car=>!car.pieces[0])){
+          throw new Error('Paquete de vehículos incompleto');
+        }
         passengerMeshes.push(...cars);
         // Solo activar cada modelo cuando ha terminado de cargarse.
         const packSlots=oncomingCars.filter(car=>car.isPackPlaceholder);
         packSlots.forEach((car,i)=>installPassengerVariant(car,i));
         nextPassengerVariant=packSlots.length;
         loadedPassengerPack=true;
+        document.getElementById('trafficLoadError').hidden=true;
         console.info('Carros nuevos cargados desde paquete original:',
           passengerMeshes.map(c=>c.name).join(', '));
       }catch(err){
         // Si Safari falla al cargar el paquete, NO mostrar carros falsos.
-        console.warn('Paquete de carros no disponible:',err);
+        console.error('Error al cargar los 10 vehículos del paquete 3D:',err);
         for(const car of oncomingCars){
           if(car.isPackPlaceholder&&!car.modelReady)car.group.visible=false;
+        }
+        // Mostrar un aviso real al usuario para no aparentar tráfico.
+        const trafficError=document.getElementById('trafficLoadError');
+        if(trafficError){
+          trafficError.textContent='No se cargaron los carros 3D. Actualiza la página.';
+          trafficError.hidden=false;
+        }
+      } finally {
+        initialTrafficReady=true;
+        // Ambas cargas se verifican antes de comenzar.
+        if(pendingStart && initialVehicleReady){
+          pendingStart=false;
+          reset();
         }
       }
     }
@@ -2518,11 +2541,11 @@
     let crashKind = '';
     let crashFallProgress = 0;
     function reset() {
-      if(!initialVehicleReady){
+      if(!initialVehicleReady || !initialTrafficReady){
         pendingStart=true;
         startBtn.hidden=false;
-        startBtn.textContent='CARGANDO FOURTRACK…';
-        messageEl.textContent='PREPARANDO EL YAMAHA RAPTOR…';
+        startBtn.textContent='CARGANDO VEHÍCULOS…';
+        messageEl.textContent='PREPARANDO FOURTRACK Y TRÁFICO 3D…';
         return;
       }
       document.body.classList.remove('level-complete');
