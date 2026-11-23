@@ -154,6 +154,62 @@
       #controls > .btn.gas{width:clamp(128px,39vw,160px);height:116px}
       #hint{bottom:150px}
     }
+
+    /* HUXCASTI ARCADE / Wheelie Challenge 2.0 - móvil horizontal */
+    :root{--neon:#1bd8ff;--gold:#ffd43d;--deep:#081a35}
+    #hud{top:max(9px,env(safe-area-inset-top));left:clamp(62px,9vw,125px);right:clamp(62px,9vw,125px);gap:clamp(5px,1vw,16px);z-index:40}
+    #hud .pill{min-width:0;text-align:center;padding:clamp(5px,1vw,10px) 4px;background:linear-gradient(155deg,#173e67ed,#051124eb);
+      border:2px solid #63dcff;box-shadow:0 2px 0 #bdefff inset,0 0 15px #18c5f45e,0 7px 16px #0008;border-radius:clamp(10px,2vw,20px)}
+    #hud .pill:nth-child(2){border-color:#ffd66b;box-shadow:0 2px 0 #fff1af inset,0 0 14px #ffd12f5b,0 7px 16px #0008}
+    #hud .pill small{color:#fff;font-size:clamp(8px,1.25vw,15px);font-weight:1000;font-style:italic;letter-spacing:.02em;text-shadow:0 2px 2px #0009}
+    #hud .pill span{color:#ffd83a;font-size:clamp(16px,2.6vw,30px);font-style:italic;font-weight:1000;text-shadow:0 3px 0 #8c5700}
+    #gameBrand{position:fixed;top:clamp(68px,11vw,114px);left:50%;transform:translateX(-50%) skew(-8deg);z-index:22;
+      pointer-events:none;text-align:center;filter:drop-shadow(0 5px 3px #000c);transition:opacity .2s;white-space:nowrap;line-height:.86}
+    #gameBrand b{display:block;font-size:clamp(26px,5.4vw,70px);letter-spacing:-.05em;color:white;-webkit-text-stroke:clamp(1px,.28vw,4px) #061123;
+      text-shadow:0 4px 0 #153958,0 7px 0 #091122;font-weight:1000}
+    #gameBrand strong{display:block;margin-top:5px;font-size:clamp(21px,4.2vw,54px);color:#ffdf36;
+      -webkit-text-stroke:clamp(1px,.23vw,3px) #101729;text-shadow:0 4px 0 #b3221b,0 7px 0 #0c1424;font-weight:1000}
+    body.playing #gameBrand{opacity:0}
+    #coinBadge{position:fixed;top:clamp(78px,12vw,124px);right:max(12px,env(safe-area-inset-right));z-index:30;
+      color:#ffe35c;background:#06162bd9;border:1px solid #ffd75f99;border-radius:40px;padding:7px 13px;
+      font-size:clamp(13px,2.2vw,19px);font-weight:1000;box-shadow:0 5px 12px #0008;pointer-events:none}
+    #coinBadge.collected{animation:coinPulse .28s ease-out}
+    @keyframes coinPulse{50%{transform:scale(1.18);filter:brightness(1.8)}}
+    #pauseBtn{display:none;position:fixed;top:max(10px,env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left));z-index:45;
+      width:clamp(43px,6.5vw,64px);height:clamp(43px,6.5vw,64px);font-size:clamp(21px,3vw,30px);
+      color:#fff;background:#0b1f31e8;border:2px solid #c3eff7;border-radius:17px;box-shadow:0 4px 11px #0009;touch-action:manipulation}
+    body.playing #pauseBtn{display:block}
+    body.paused #gameBrand{opacity:1}
+    #pauseMessage{display:none;position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);font-size:clamp(30px,6vw,68px);
+      color:#fff;font-weight:1000;text-shadow:0 4px 15px #000;z-index:50;pointer-events:none}
+    body.paused #pauseMessage{display:block}
+    #message{top:26%;font-size:clamp(15px,3vw,29px);color:#fff7bf;z-index:25}
+    body:not(.playing) #message{top:35%;font-size:clamp(16px,3vw,28px)}
+    #start{background:linear-gradient(#a8ff27,#20b724);border:3px solid #efffd0;border-radius:22px;color:#05230f;
+      box-shadow:0 5px 0 #10751b,0 0 18px #55ff656b,0 13px 24px #0008;top:59%;font-size:clamp(17px,3vw,25px)}
+    #modelPicker{top:calc(59% + 65px)}
+    #controls{bottom:max(15px,env(safe-area-inset-bottom));z-index:35;align-items:flex-end}
+    #controls > .steering-control{border:3px solid #ffffffcf;background:radial-gradient(circle at 45% 40%,#384c56dd,#0a1626aa);
+      box-shadow:inset 0 0 14px #000,0 8px 24px #0009;width:clamp(96px,21vw,160px);height:clamp(96px,21vw,160px)}
+    .steering-control::before{top:auto;bottom:-17px;font-size:clamp(9px,1.5vw,14px);text-shadow:0 2px 6px #000}
+    #controls > .btn.gas{background:linear-gradient(180deg,#65fb16,#14c508 65%,#069b19);color:#fff;border:3px solid #ceff79;
+      box-shadow:inset 0 4px 0 #d0ff96,0 6px 0 #086b1e,0 9px 23px #000a,0 0 14px #56ff3a66;
+      text-shadow:0 3px 4px #06320d;font-size:clamp(18px,3.3vw,31px);font-style:italic;
+      width:clamp(120px,25vw,235px);height:clamp(79px,14vw,116px);border-radius:24px}
+    #controls > .btn.gas.pressed{background:linear-gradient(#a4ff5d,#19db14);transform:translateY(4px);box-shadow:inset 0 4px 0 #fff8,0 2px 0 #086b1e}
+    #hint{display:none}
+    #roadAlert{top:clamp(120px,17vw,155px);font-size:clamp(10px,1.7vw,14px);background:#07172dcc}
+    @media(max-height:440px){
+      #hud{top:5px}#hud .pill{padding:3px 4px}#hud .pill small{font-size:9px}#hud .pill span{font-size:19px}
+      #gameBrand{top:64px}#coinBadge{top:66px}#roadAlert{top:108px}
+      #controls > .steering-control{width:99px;height:99px}
+      #controls > .btn.gas{height:75px;width:146px}
+      #start{top:58%}#modelPicker{top:calc(58% + 58px)}
+    }
+    @media(orientation:portrait){#gameBrand{top:25%}#coinBadge{top:90px}
+      #controls > .steering-control{width:clamp(105px,31vw,152px);height:clamp(105px,31vw,152px)}
+      #controls > .btn.gas{width:clamp(112px,33vw,170px);height:95px}
+    }
 </style>
 </head>
 <body>
@@ -163,6 +219,10 @@
     <div class="pill"><small>ÁNGULO</small><span id="angle">0°</span></div>
   </div>
 
+  <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
+  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span></div>
+  <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
+  <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
   <div id="message">WHEELIE CHALLENGE</div>
   <button id="start">COMENZAR</button>
@@ -199,13 +259,15 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x9cc5d5);
-    scene.fog = new THREE.Fog(0x9cc5d5, 28, 155);
+    scene.background = new THREE.Color(0x82d6ff);
+    scene.fog = new THREE.Fog(0xa8dded, 65, 250);
 
-    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 300);
+    const camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, 0.1, 330);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.4;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -226,9 +288,9 @@
     scene.add(sun);
 
     const mat = (c, rough = 0.85) => new THREE.MeshStandardMaterial({ color: c, roughness: rough });
-    const groundMat = mat(0x679969);
-    const roadMat = mat(0x363d44, 0.95);
-    const shoulderMat = mat(0xbf9d73);
+    const groundMat = mat(0x5eae53);
+    const roadMat = mat(0x525a61, 0.96);
+    const shoulderMat = mat(0xba7a4b);
     const stripeMat = mat(0xf3eed6, 0.65);
     const edgeMat = mat(0xe4ddcb, 0.7);
 
@@ -259,83 +321,69 @@
       roadEdges.push(edge);
     }
 
+    // Carriles de autopista: doble raya amarilla y separadores blancos.
+    const goldenRoadMat = new THREE.MeshBasicMaterial({color:0xffc928});
+    const whiteLaneMat = new THREE.MeshBasicMaterial({color:0xfafcff});
+    const centralLines = [];
+    for (const x of [-0.19,0.19]) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(.095,.024,2000),goldenRoadMat);
+      line.position.set(x,.046,0);scene.add(line);centralLines.push(line);
+    }
     const stripes = [];
-    for (let i = 0; i < 25; i++) {
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 3.0), stripeMat);
-      stripe.rotation.x = -Math.PI / 2;
-      stripe.position.set(0, 0.03, -i * 12 + 12);
-      scene.add(stripe);
-      stripes.push(stripe);
+    for (let i=0;i<27;i++)for(const x of [-3.0,3.0]){
+      const stripe=new THREE.Mesh(new THREE.PlaneGeometry(.12,3.7),whiteLaneMat);
+      stripe.rotation.x=-Math.PI/2;stripe.position.set(x,.047,12-i*12);
+      scene.add(stripe);stripes.push({mesh:stripe,baseZ:12-i*12});
     }
-
-    const landscape = [];
-    const treeTrunkGeo = new THREE.CylinderGeometry(0.18, 0.22, 2.2, 6);
-    const treeLeafGeo = new THREE.ConeGeometry(1.4, 3.2, 7);
-    const houseGeo = new THREE.BoxGeometry(5.5, 3.2, 5.2);
-    const roofGeo = new THREE.ConeGeometry(4.0, 1.9, 4);
-    const trunkMat = mat(0x71513c);
-    const leafA = mat(0x356548);
-    const leafB = mat(0x517d54);
-    const roofMat = mat(0xa55f46);
-    const houseMats = [mat(0xc7b89e), mat(0xd6cdb8), mat(0xa9b9c4), mat(0xcfc8bb)];
-    const poleMat = mat(0x6b6f74);
-
-    function registerScenery(group, z) {
-      group.userData.baseZ = z;
-      scene.add(group);
-      landscape.push(group);
-    }
-
-    for (let i = 0; i < 34; i++) {
-      for (const side of [-1, 1]) {
-        const group = new THREE.Group();
-        group.position.x = side * (9.5 + (i % 4) * 2.1);
-        const z = -150 + i * 9 + side * 2;
-        if (i % 6 === 0) {
-          const house = new THREE.Mesh(houseGeo, houseMats[i % houseMats.length]);
-          house.position.y = 1.6;
-          house.castShadow = house.receiveShadow = true;
-          group.add(house);
-          const roof = new THREE.Mesh(roofGeo, roofMat);
-          roof.rotation.y = Math.PI / 4;
-          roof.position.y = 4.1;
-          roof.castShadow = true;
-          group.add(roof);
-        } else {
-          for (let j = 0; j < 2; j++) {
-            const x = (j - 0.5) * 2.7;
-            const trunk = new THREE.Mesh(treeTrunkGeo, trunkMat);
-            trunk.position.set(x, 1.1, 0);
-            trunk.castShadow = true;
-            group.add(trunk);
-            const crown = new THREE.Mesh(treeLeafGeo, i % 2 ? leafA : leafB);
-            crown.position.set(x, 3.0, 0);
-            crown.castShadow = true;
-            group.add(crown);
-          }
-        }
-        registerScenery(group, z);
+    const guardrails=[];
+    const railMaterial=mat(0xc5dde1,.44),railPostMat=mat(0x71868e,.65);
+    for(const side of [-1,1]){
+      for(const height of [.60,.94]){
+        const bar=new THREE.Mesh(new THREE.BoxGeometry(.17,.13,400),railMaterial);
+        bar.position.set(side*6.45,height,0);scene.add(bar);guardrails.push(bar);
       }
     }
 
-    for (let i = 0; i < 28; i++) {
-      for (const side of [-1, 1]) {
-        const group = new THREE.Group();
-        group.position.x = side * 7.2;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 5.0, 6), poleMat);
-        pole.position.y = 2.5;
-        pole.castShadow = true;
-        group.add(pole);
-        const arm = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.12), poleMat);
-        arm.position.set(-side * 0.48, 4.85, 0);
-        group.add(arm);
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.09, 0.3), new THREE.MeshBasicMaterial({ color: 0xfff0bd }));
-        lamp.position.set(-side * 0.88, 4.75, 0);
-        group.add(lamp);
-        registerScenery(group, -145 + i * 10);
-      }
-    }
 
+    // Vegetación frondosa, taludes y alumbrado de autopista.
+    const landscape=[];
+    const treeTrunkGeo=new THREE.CylinderGeometry(.18,.33,3.4,6);
+    const treeLeafGeo=new THREE.IcosahedronGeometry(1.55,1);
+    const leafA=mat(0x2f9e31),leafB=mat(0x57b937),leafC=mat(0x82d13e),trunkMat=mat(0x715039);
+    const rockMat=mat(0xb17d58),rockShade=mat(0xa26747),poleMat=mat(0x778a94);
+    function registerScenery(group,z){group.userData.baseZ=z;scene.add(group);landscape.push(group);}
+    for(let i=0;i<44;i++)for(const side of [-1,1]){
+      const group=new THREE.Group(),z=-150+i*7+side*1.3;
+      group.position.x=side*(9.0+(i%4)*1.18);
+      const trunk=new THREE.Mesh(treeTrunkGeo,trunkMat);
+      trunk.position.y=1.7;group.add(trunk);
+      for(let j=0;j<3;j++){
+        const crown=new THREE.Mesh(treeLeafGeo,[leafA,leafB,leafC][(i+j)%3]);
+        crown.scale.set(1.1+(i%3)*.12,.94,1.04);
+        crown.position.set((j-1)*.95,4.25+(j===1?.75:0),(j-1)*.24);
+        group.add(crown);
+      }
+      if(i%6===0){
+        const hill=new THREE.Mesh(new THREE.ConeGeometry(5.4,6.8,5),i%2?rockMat:rockShade);
+        hill.rotation.y=i*.55;hill.position.set(side*7.5,1.0,-1.8);group.add(hill);
+      }
+      registerScenery(group,z);
+    }
+    for(let i=0;i<24;i++)for(const side of [-1,1]){
+      const group=new THREE.Group(),z=-148+i*13;
+      group.position.x=side*7.55;
+      const post=new THREE.Mesh(new THREE.BoxGeometry(.13,1.1,.13),railPostMat);
+      post.position.y=.55;group.add(post);
+      if(i%2===0){
+        const pole=new THREE.Mesh(new THREE.CylinderGeometry(.065,.085,6.9,7),poleMat);
+        pole.position.set(side*.25,3.45,0);group.add(pole);
+        const arm=new THREE.Mesh(new THREE.BoxGeometry(1.35,.075,.12),poleMat);
+        arm.position.set(-side*.62,6.82,0);group.add(arm);
+        const lamp=new THREE.Mesh(new THREE.BoxGeometry(.45,.09,.33),new THREE.MeshBasicMaterial({color:0xffefb5}));
+        lamp.position.set(-side*1.22,6.74,0);group.add(lamp);
+      }
+      registerScenery(group,z);
+    }
 
     /* Badenes, lomos y conos en el recorrido: se reciclan por delante del jugador. */
     const obstacles = [];
@@ -991,9 +1039,11 @@
       road.position.z = rider.position.z;
       shoulder.position.z = rider.position.z;
       for (const edge of roadEdges) edge.position.z = rider.position.z;
-      for (let i = 0; i < stripes.length; i++) {
-        const z = 12 - i * 12;
-        stripes[i].position.z = rider.position.z + ((((z + distance + 155) % 310) + 310) % 310 - 155);
+      for (const line of centralLines) line.position.z = rider.position.z;
+      for (const rail of guardrails) rail.position.z = rider.position.z;
+      for (const stripe of stripes) {
+        const z=stripe.baseZ;
+        stripe.mesh.position.z = rider.position.z + ((((z + distance + 155) % 310) + 310) % 310 - 155);
       }
       for (const group of landscape) {
         group.position.z = rider.position.z + ((((group.userData.baseZ + distance + 155) % 310) + 310) % 310 - 155);
