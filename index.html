@@ -1150,6 +1150,12 @@
     const coinBatches=[];
     const coins=[];
     const coinDummy=new THREE.Object3D();
+    // El frustum representa exactamente la región visible de la cámara.
+    // Una chapita no se elimina cuando la pasamos: solo se deja de dibujar
+    // un grupo cuando TODO ese grupo está fuera de la cámara.
+    const coinCameraFrustum=new THREE.Frustum();
+    const coinCameraMatrix=new THREE.Matrix4();
+    const coinBatchBounds=new THREE.Sphere();
     const coinCountEl=document.getElementById('coinCount');
     let coinCount=0;
     let nextCoinAt=24;
@@ -1243,11 +1249,20 @@
         const bob=Math.sin(rivalClock*2+coin.at*.1)*.18;
         setCoinTransform(coin,rivalClock*2.6+coin.at*.10,bob);
       }
-      // Solo se dibujan los lotes cercanos a la cámara. Los lotes lejanos
-      // continúan almacenados con sus posiciones intactas.
+      // Culling visual por cámara (NO por distancia arbitraria):
+      // mantener visibles las chapitas no recogidas hasta que realmente
+      // salgan del encuadre. Sus coordenadas originales se conservan.
+      camera.updateMatrixWorld(true);
+      coinCameraMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+      coinCameraFrustum.setFromProjectionMatrix(coinCameraMatrix);
       for(const batch of coinBatches){
-        const visible=batch.lastAt>=distance-65 &&
-          batch.firstAt<=distance+COIN_LOOKAHEAD+25;
+        // Esfera conservadora: contiene todas las posiciones del lote,
+        // incluso al flotar y girar. Evita que desaparezcan antes de tiempo.
+        const middle=(batch.firstAt+batch.lastAt)*.5;
+        const halfLength=(batch.lastAt-batch.firstAt)*.5;
+        coinBatchBounds.center.set(0,1.45,-middle);
+        coinBatchBounds.radius=Math.sqrt(halfLength*halfLength+16);
+        const visible=coinCameraFrustum.intersectsSphere(coinBatchBounds);
         for(const mesh of batch.meshes)mesh.visible=visible;
       }
     }
