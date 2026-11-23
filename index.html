@@ -767,20 +767,129 @@
 
     buildFallbackATV();
 
-    // El usuario proporcionó un escaneo 3D en ZIP.
-    // Este modelo ya viene optimizado y con brazos/piernas en postura de conductor.
-    // No tiene huesos: usa inclinación procedural del cuerpo completo.
+    // El conductor aportado es una malla escaneada sin esqueleto (bones).
+    // Animamos sus vértices en GPU para dar viento a la camiseta y pequeños
+    // gestos a cabeza y brazos, sin afectar el chasis ni consumir CPU por vértice.
+    const riderCloth={
+      time:{value:0},wind:{value:0},steer:{value:0},
+      bounce:{value:0},head:{value:0}
+    };
+    let customRiderLastSpeed=0;
+    let customRiderLastGround=0;
+    let customRiderSuspension=0;
+    function enableRiderClothWind(sceneModel){
+      const uniforms=riderCloth;
+      let animatedMeshes=0;
+      sceneModel.traverse(obj=>{
+        if(!obj.isMesh || !obj.geometry?.getAttribute('position'))return;
+        const originals=Array.isArray(obj.material)?obj.material:[obj.material];
+        const updated=originals.map(source=>{
+          if(!source)return source;
+          const material=source.clone();
+          material.onBeforeCompile=shader=>{
+            shader.uniforms.uRiderWindTime=uniforms.time;
+            shader.uniforms.uRiderWindPower=uniforms.wind;
+            shader.uniforms.uRiderTurn=uniforms.steer;
+            shader.uniforms.uRiderBounce=uniforms.bounce;
+            shader.uniforms.uRiderHead=uniforms.head;
+            shader.vertexShader=shader.vertexShader.replace(
+              '#include <common>',
+              '#include <common>\n'+
+              'uniform float uRiderWindTime;\n'+
+              'uniform float uRiderWindPower;\n'+
+              'uniform float uRiderTurn;\n'+
+              'uniform float uRiderBounce;\n'+
+              'uniform float uRiderHead;\n'
+            );
+            shader.vertexShader=shader.vertexShader.replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>\n'+
+              // coordenadas originales del escaneo: hombros ~y 0.5,
+              // cintura ~y 0.05, cabeza a partir de y 0.62.
+              'float shirtY=smoothstep(0.02,0.16,position.y)*'+
+                '(1.0-smoothstep(0.49,0.63,position.y));\n'+
+              'float shirtX=1.0-smoothstep(0.19,0.37,abs(position.x));\n'+
+              'float shirtMask=shirtY*shirtX;\n'+
+              'float hem=(1.0-smoothstep(0.12,0.37,position.y));\n'+
+              'float windPhase=uRiderWindTime*10.0-position.y*25.0+'+
+                'position.x*14.0-position.z*5.0;\n'+
+              'float windFold=sin(windPhase)*0.67+'+
+                'sin(windPhase*0.59+position.x*19.0)*0.33;\n'+
+              'float clothMotion=windFold*(0.012+0.025*hem)*'+
+                'uRiderWindPower*shirtMask;\n'+
+              'transformed+=normalize(normal)*clothMotion;\n'+
+              // Borde inferior más suelto: en la marcha la tela se
+              // desplaza hacia atrás sin despegar la camisa del cuerpo.
+              'transformed.z+=uRiderWindPower*hem*shirtMask*'+
+                '(0.008+0.011*sin(windPhase*0.8));\n'+
+              // Movimiento leve del cuello y cabeza, con transición suave.
+              'float headMask=smoothstep(0.59,0.74,position.y);\n'+
+              'transformed.x+=headMask*(uRiderTurn*0.018+'+
+                'sin(uRiderWindTime*2.2)*uRiderHead*0.012);\n'+
+              'transformed.z+=headMask*uRiderBounce*0.010;\n'+
+              // Brazos/antebrazos reaccionan a los pequeños baches;
+              // los puños no se trasladan tanto como los hombros.
+              'float armMask=smoothstep(0.19,0.29,abs(position.x))*'+
+                '(1.0-smoothstep(0.46,0.61,position.y))*'+
+                'smoothstep(-0.31,-0.11,position.y);\n'+
+              'transformed.y+=armMask*'+
+                '(sin(uRiderWindTime*7.0+position.x*9.0)*'+
+                '0.007*uRiderWindPower+uRiderBounce*0.005);\n'
+            );
+          };
+          material.customProgramCacheKey=()=> 'huxcasti-rider-wind-v1';
+          material.needsUpdate=true;
+          return material;
+        });
+        obj.material=Array.isArray(obj.material)?updated:updated[0];
+        animatedMeshes++;
+      });
+      console.info('Animación de viento aplicada al conductor:',animatedMeshes,'mallas');
+    }
     function animateCustomRider(dt){
       if(!customRider || paused)return;
       customRiderClock+=dt;
       const moving=active?THREE.MathUtils.clamp(speed/22,0,1):0;
       const wheelie=active?THREE.MathUtils.clamp(tilt/1.5,0,1):0;
       const steer=active?lateralMotion:0;
-      const bump=Math.sin(customRiderClock*(5+moving*9))*.010*moving;
-      customRider.position.y=THREE.MathUtils.damp(customRider.position.y,1.31+bump,10,dt);
-      customRider.rotation.x=THREE.MathUtils.damp(customRider.rotation.x,-wheelie*.23-moving*.045,7,dt);
-      customRider.rotation.z=THREE.MathUtils.damp(customRider.rotation.z,-steer*.14,7,dt);
-      customRider.rotation.y=THREE.MathUtils.damp(customRider.rotation.y,-steer*.055,7,dt);
+      const accelerating=active&&keys.gas?1:0;
+      const acceleration=active?THREE.MathUtils.clamp(
+        (speed-customRiderLastSpeed)/Math.max(dt,.01),-10,10):0;
+      customRiderLastSpeed=speed;
+      const terrainShift=THREE.MathUtils.clamp(
+        (surfaceContactHeight-customRiderLastGround)/Math.max(dt,.01),-1,1);
+      customRiderLastGround=surfaceContactHeight;
+      customRiderSuspension=THREE.MathUtils.damp(
+        customRiderSuspension,terrainShift,9,dt);
+      const breath=Math.sin(customRiderClock*2.2);
+      const bumps=Math.sin(customRiderClock*(5+moving*11))*.011*moving;
+      const counterLean=-steer*(.11+.07*moving);
+      // Sentado sobre el asiento: conservar movimientos muy pequeños
+      // de cadera para que el personaje no parezca flotar.
+      customRider.position.y=THREE.MathUtils.damp(
+        customRider.position.y,1.31+bumps+breath*.003+
+          customRiderSuspension*.010,10,dt);
+      customRider.position.x=THREE.MathUtils.damp(
+        customRider.position.x,steer*.027,8,dt);
+      customRider.position.z=THREE.MathUtils.damp(
+        customRider.position.z,.10-accelerating*.012+
+          wheelie*.015,7,dt);
+      customRider.rotation.x=THREE.MathUtils.damp(
+        customRider.rotation.x,-wheelie*.21-moving*.038-
+        acceleration*.003+breath*.008-customRiderSuspension*.022,7,dt);
+      customRider.rotation.z=THREE.MathUtils.damp(
+        customRider.rotation.z,counterLean+
+        Math.sin(customRiderClock*4.3)*.007*moving,8,dt);
+      customRider.rotation.y=THREE.MathUtils.damp(
+        customRider.rotation.y,-steer*.09,7,dt);
+      // La camisa reacciona a la velocidad y a cambios de GAS.
+      riderCloth.time.value=customRiderClock;
+      riderCloth.wind.value=THREE.MathUtils.damp(
+        riderCloth.wind.value,.035+moving*(.74+.24*accelerating),5,dt);
+      riderCloth.steer.value=THREE.MathUtils.damp(
+        riderCloth.steer.value,steer,6,dt);
+      riderCloth.bounce.value=customRiderSuspension+bumps*10;
+      riderCloth.head.value=.35+moving*.65;
     }
     function installCustomRider(sceneModel){
       const root=new THREE.Group();
@@ -800,6 +909,7 @@
           }
         }
       });
+      enableRiderClothWind(sceneModel);
       root.add(sceneModel);
       if(customRider?.parent)customRider.parent.remove(customRider);
       customRider=root;
@@ -1536,6 +1646,11 @@
       rearPivot.rotation.set(0, 0, 0);
       if(avatarRig){avatarRig.rideClock=0;avatarRig.hips.rotation.set(0,0,0);avatarRig.torso.rotation.set(0,0,0);avatarRig.neck.rotation.set(0,0,0);}
       customRiderClock=0;
+      customRiderLastSpeed=0;
+      customRiderLastGround=0;
+      customRiderSuspension=0;
+      riderCloth.time.value=0;riderCloth.wind.value=0;
+      riderCloth.steer.value=0;riderCloth.bounce.value=0;
       if(customRider){customRider.position.set(0,1.31,.10);customRider.rotation.set(0,0,0);}
       // CRÍTICO: la cámara NO debe interpolar desde la posición de la
       // partida anterior. En iPhone podía quedar detrás y mirar al cielo.
