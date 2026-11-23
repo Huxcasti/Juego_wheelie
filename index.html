@@ -1823,7 +1823,8 @@
             Math.sin(Math.PI*pickupProgress)*.55,
           THREE.MathUtils.lerp(-coin.at,rider.position.z-.30,eased)
         );
-        coinDummy.scale.setScalar(Math.max(.000001,1-eased*.99));
+        // Mantener la moneda visible durante el vuelo y encogerla al final.
+        coinDummy.scale.setScalar(Math.max(.000001,Math.pow(1-pickupProgress,1.25)));
         coinDummy.rotation.set(0,angle+pickupProgress*Math.PI*5,0);
       }else{
         coinDummy.position.set(coin.lane,1.45+hover,-coin.at);
