@@ -1344,7 +1344,10 @@
       // ya apunta a +Z en el GLB. Sus faros blancos están en +Z y
       // las luces rojas en -Z. Girarlo lo hacía venir de reversa.
       // Conservar intactos carriles, colisiones y tamaño del grupo.
-      realCar.rotation.y=template.name==='Coupe'?0:Math.PI;
+      // El coupé del GLB tiene las ruedas alineadas con un eje interno
+      // 17.7° torcido respecto a Z (medido en la geometría real).
+      // Corregir su rumbo sin invertir el frente.
+      realCar.rotation.y=template.name==='Coupe'?-0.309:Math.PI;
       group.name='Carro original · '+template.name;
       group.add(realCar);
       const rolling=[];
