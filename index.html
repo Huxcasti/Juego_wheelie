@@ -274,46 +274,34 @@
     #bus3DCredit:focus-visible{outline:2px solid #fff}
     body.playing #bus3DCredit{display:none}
 
-    /* Guía de ATV 3D: imagen aprobada por el jugador, reemplaza el SVG.
-       No desplaza el centro táctil ni modifica el tamaño de GAS. */
-    #controls > .steering-control {
-      border:0;background:transparent;box-shadow:none;
-      overflow:visible;touch-action:none;-webkit-user-select:none;user-select:none;
-      -webkit-tap-highlight-color:transparent;
-    }
-    #steering-wheel{
-      width:100%;height:100%;display:block;border-radius:50%;
-      transition:transform .075s ease-out;
-      transform-origin:50% 50%;will-change:transform;
-    }
-    #steering-art{
-      display:block;width:100%;height:100%;object-fit:contain;
-      pointer-events:none;-webkit-user-drag:none;user-select:none;
-      filter:drop-shadow(0 5px 7px #0009);
-    }
-    #steering:focus-visible{outline:2px solid #ffe052;outline-offset:5px}
-    #steering.steering-active #steering-art{
-      filter:drop-shadow(0 4px 10px #ffd1489f);
-    }
-    @media(prefers-reduced-motion:reduce){
-      #steering-wheel{transition:none}
-    }
-    /* Cubierta opaca desde el primer HTML: jamás mostrar modelos de prueba. */
-    #loadingOverlay{position:fixed;inset:0;z-index:10000;background:linear-gradient(155deg,#071323,#163a53);
-      display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;
-      color:white;text-align:center;touch-action:none}
-    #loadingOverlay[hidden]{display:none}
-    #loadingBrand{font-size:clamp(34px,8vw,72px);font-weight:1000;font-style:italic;line-height:.98;
-      text-shadow:0 4px 0 #000;letter-spacing:-.04em}
-    #loadingBrand span{color:#ffcf32;display:block}
-    #loadingStatus{font-size:14px;font-weight:800;margin:28px 0 12px;color:#d9efff}
-    #loadingProgress{width:min(78vw,330px);height:10px;border-radius:20px;overflow:hidden;background:#ffffff25}
-    #loadingProgressBar{height:100%;width:0;background:linear-gradient(90deg,#ffb521,#ffef7b);
-      border-radius:20px;transition:width .18s ease-out}
-    #loadingCount{font-size:12px;color:#c3daeb;margin-top:8px}
-    #loadingRetry{margin-top:18px;padding:12px 22px;border-radius:14px;font-size:16px;font-weight:900;
-      border:2px solid #fff6b0;color:#172336;background:#ffdb4c;touch-action:manipulation}
-    #loadingRetry[hidden]{display:none}
+    /* Manubrio de doble pulgar: arte transparente, dos zonas independientes. */
+    #controls{left:0;right:0;bottom:max(8px,env(safe-area-inset-bottom));padding:0;
+      display:flex;justify-content:center;align-items:center;gap:0;pointer-events:none;z-index:35}
+    #controls > #steering{position:relative;display:block;width:min(94vw,650px);height:auto;
+      aspect-ratio:1448 / 575;flex:none;background:none;border:0;border-radius:0;box-shadow:none;
+      overflow:visible;touch-action:none;pointer-events:auto;cursor:grab;
+      -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    #steering::before{content:none}
+    #steering-wheel{position:absolute;inset:0;width:100%;height:100%;display:block;
+      border-radius:0;transform-origin:50% 66%;pointer-events:none;
+      transition:transform .085s ease-out;will-change:transform}
+    #steering-art{position:absolute;inset:0;display:block;width:100%;height:100%;
+      object-fit:fill;pointer-events:none;filter:drop-shadow(0 5px 5px #0008)}
+    #throttle-art{position:absolute;left:71.1326%;top:66.087%;width:14.848%;height:31.304%;
+      pointer-events:none;transform-origin:30% 12%;transition:transform .095s ease-out,filter .095s ease-out;
+      will-change:transform;object-fit:fill}
+    #steering.gas-active #throttle-art{transform:translateY(9%) scaleY(.70) rotate(-5deg);
+      filter:brightness(.8) drop-shadow(0 0 5px #ff971a)}
+    #steering.steering-active{cursor:grabbing}
+    #handlebar-left,#handlebar-right{position:absolute;top:25%;height:75%;pointer-events:none}
+    #handlebar-left{left:0;width:46%}
+    #handlebar-right{right:0;width:46%}
+    #handlebar-labels{position:absolute;bottom:-1px;left:3%;right:3%;display:flex;
+      justify-content:space-between;font-size:clamp(9px,2.5vw,13px);font-weight:900;
+      color:#fff;text-shadow:0 2px 4px #000;pointer-events:none;letter-spacing:.05em}
+    #handlebar-labels span:last-child{color:#ffd08a}
+    @media(orientation:landscape){#controls > #steering{width:min(90vw,110dvh,650px)}}
+    @media(prefers-reduced-motion:reduce){#steering-wheel,#throttle-art{transition:none}}
 </style>
 </head>
 <body>
@@ -365,14 +353,16 @@
 
   <div id="controls" aria-label="Controles táctiles del juego">
     <div id="steering" class="steering-control" role="slider" tabindex="0"
-         aria-label="Guía de FourTrax: izquierda o derecha"
-         aria-orientation="horizontal" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
+      aria-label="Guía de FourTrax, mueve cualquiera de los pulgares; acelerador abajo a la derecha"
+      aria-orientation="horizontal" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
       <div id="steering-wheel" aria-hidden="true">
-        <img id="steering-art" src="./assets/atv-steering-control.webp"
-             alt="" draggable="false" decoding="async" fetchpriority="high"/>
+        <img id="steering-art" alt="" draggable="false"/>
+        <img id="throttle-art" alt="" draggable="false"/>
       </div>
+      <div id="handlebar-left" aria-hidden="true"></div>
+      <div id="handlebar-right" aria-hidden="true"></div>
+      <div id="handlebar-labels" aria-hidden="true"><span>DIRECCIÓN</span><span>GAS</span></div>
     </div>
-    <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar y hacer wheelie">GAS</button>
   </div>
 
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
@@ -1618,65 +1608,79 @@
     }
 
 
-    // Nuevo guía ATV: rotación intuitiva y movimiento en la dirección
-    // del dedo (derecha positiva, izquierda negativa). Cada control usa
-    // su pointerId; GAS y dirección admiten dos dedos simultáneos.
+    // Ambos pulgares pueden girar; cada toque conserva su propio origen.
+    // El pulgar derecho puede mantener GAS y dirigir a la vez.
     const steeringEl=document.getElementById('steering');
     const steeringWheelEl=document.getElementById('steering-wheel');
+    const throttleArt=document.getElementById('throttle-art');
     let steerValue=0,keyboardSteer=0,lateralMotion=0;
-    let steeringPointerId=null;
+    const steeringTouches=new Map();
+    const gasKeys=new Set();
+    const directionKeys=new Set();
     function setSteer(value){
       steerValue=THREE.MathUtils.clamp(value,-1,1);
-      // Positivo = imagen se mueve y gira hacia la derecha.
-      steeringWheelEl.style.transform=
-        'translateX('+(steerValue*4).toFixed(1)+'px) rotate('+
-        (steerValue*34).toFixed(1)+'deg)';
+      steeringWheelEl.style.transform='translateX('+(steerValue*3).toFixed(1)+'px) rotate('+(steerValue*13).toFixed(1)+'deg)';
       steeringEl.setAttribute('aria-valuenow',String(Math.round(steerValue*100)));
     }
-    function steeringAt(clientX){
-      const r=steeringEl.getBoundingClientRect();
-      const center=r.left+r.width*.5;
-      const halfRange=r.width*.43;
-      setSteer((clientX-center)/halfRange);
+    function syncThumbs(){
+      const values=[...steeringTouches.values()];
+      // La mano que más se mueve manda, y dos movimientos coordinados
+      // se combinan sin perder respuesta por mantener GAS quieto.
+      const left=Math.min(0,...values.map(v=>v.delta));
+      const right=Math.max(0,...values.map(v=>v.delta));
+      setSteer(left+right);
+      steeringEl.classList.toggle('steering-active',values.length>0);
+      keys.gas=values.some(v=>v.gas)||gasKeys.size>0;
+      steeringEl.classList.toggle('gas-active',keys.gas);
+    }
+    function clearThumbControls(){
+      const ids=[...steeringTouches.keys()];
+      steeringTouches.clear();
+      gasKeys.clear();
+      directionKeys.clear();
+      keyboardSteer=0;
+      syncThumbs();
+      for(const id of ids)try{
+        if(steeringEl.hasPointerCapture(id))steeringEl.releasePointerCapture(id);
+      }catch(err){}
     }
     steeringEl.addEventListener('pointerdown',e=>{
-      if(steeringPointerId!==null)return; // No robar otro dedo.
+      if(!active||paused||!initialSceneReady)return;
       if(e.pointerType==='mouse'&&e.button!==0)return;
+      if(steeringTouches.size>=2||steeringTouches.has(e.pointerId))return;
       e.preventDefault();
-      steeringPointerId=e.pointerId;
+      const r=steeringEl.getBoundingClientRect();
+      const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+      // Zona amplia de aceleración alrededor de la palanca naranja.
+      // El resto del puño derecho también permite guiar sin acelerar.
+      const gas=x>=.65&&y>=.48;
+      steeringTouches.set(e.pointerId,{startX:e.clientX,range:Math.max(24,r.width*.115),delta:0,gas});
       try{steeringEl.setPointerCapture(e.pointerId);}catch(err){}
-      steeringEl.classList.add('steering-active');
-      steeringAt(e.clientX);
+      syncThumbs();
     });
     steeringEl.addEventListener('pointermove',e=>{
-      if(e.pointerId!==steeringPointerId)return;
+      const touch=steeringTouches.get(e.pointerId);
+      if(!touch)return;
       e.preventDefault();
-      steeringAt(e.clientX);
+      const delta=(e.clientX-touch.startX)/touch.range;
+      touch.delta=THREE.MathUtils.clamp(Math.abs(delta)<.045?0:delta,-1,1);
+      syncThumbs();
     });
-    function finishSteeringTouch(e){
-      if(e.pointerId!==steeringPointerId)return;
-      steeringPointerId=null;
-      steeringEl.classList.remove('steering-active');
-      setSteer(0);
-    }
     for(const event of ['pointerup','pointercancel','lostpointercapture']){
-      steeringEl.addEventListener(event,finishSteeringTouch);
+      steeringEl.addEventListener(event,e=>{
+        if(steeringTouches.delete(e.pointerId))syncThumbs();
+      });
     }
     steeringEl.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
     steeringEl.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
-    steeringEl.addEventListener('keydown',e=>{
-      if(e.code==='ArrowLeft'){setSteer(-1);e.preventDefault();}
-      if(e.code==='ArrowRight'){setSteer(1);e.preventDefault();}
-    });
-    steeringEl.addEventListener('keyup',e=>{if(e.code==='ArrowLeft'||e.code==='ArrowRight')setSteer(0)});
-    addEventListener('keydown',e=>{if(e.code==='KeyA')keyboardSteer=-1;if(e.code==='KeyD')keyboardSteer=1;});
-    addEventListener('keyup',e=>{if(e.code==='KeyA'||e.code==='KeyD')keyboardSteer=0;});
-    addEventListener('blur',()=>{
-      steeringPointerId=null;
-      steeringEl.classList.remove('steering-active');
-      setSteer(0);
-    });
-
+    async function loadHandlebarArt(){
+      const {HANDLEBAR,THROTTLE}=await import('./assets/atv-handlebar-dual.js?v=dual1');
+      const image=document.getElementById('steering-art');
+      await Promise.all([[image,HANDLEBAR],[throttleArt,THROTTLE]].map(([img,src])=>
+        new Promise((resolve,reject)=>{
+          img.onload=resolve;img.onerror=reject;img.src=src;
+        })));
+    }
 
     /* Carros que vienen de frente. Las distancias están relativas al FourTrax,
        por lo que el tráfico sigue apareciendo a medida que avanzas. */
@@ -2729,34 +2733,33 @@
       document.body.classList.toggle('paused',paused);
       pauseBtn.textContent=paused?'▶':'Ⅱ';
       pauseBtn.setAttribute('aria-label',paused?'Continuar juego':'Pausar juego');
-      keys.gas=false;
-      document.querySelectorAll('#controls .pressed').forEach(b=>b.classList.remove('pressed'));
+      clearThumbControls();
     });
-    document.querySelectorAll('#controls [data-key]').forEach(btn => {
-      const key = btn.dataset.key;
-      const set = value => { keys[key] = value; btn.classList.toggle('pressed', value); };
-      btn.addEventListener('pointerdown', e => {
-        e.preventDefault();
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-        set(true);
-      });
-      // Evita que Safari interprete una pulsación larga como texto para copiar.
-      btn.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
-      btn.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, () => set(false));
+    document.addEventListener('contextmenu',e=>e.preventDefault());
+    document.addEventListener('selectstart',e=>e.preventDefault());
+    document.addEventListener('dragstart',e=>e.preventDefault());
+    window.addEventListener('blur',clearThumbControls);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)clearThumbControls();});
+    const gasCodes=new Set(['ArrowUp','Space','KeyW']);
+    const leftCodes=new Set(['ArrowLeft','KeyA']);
+    const rightCodes=new Set(['ArrowRight','KeyD']);
+    function syncKeyboard(){
+      keyboardSteer=Number([...directionKeys].some(k=>rightCodes.has(k)))-
+        Number([...directionKeys].some(k=>leftCodes.has(k)));
+      syncThumbs();
+      if(!steeringTouches.size)setSteer(0);
+    }
+    addEventListener('keydown',e=>{
+      if(!active||paused||!initialSceneReady)return;
+      if(gasCodes.has(e.code)){gasKeys.add(e.code);syncThumbs();e.preventDefault();}
+      if(leftCodes.has(e.code)||rightCodes.has(e.code)){
+        directionKeys.add(e.code);syncKeyboard();e.preventDefault();
+      }
     });
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('selectstart', e => e.preventDefault());
-    document.addEventListener('dragstart', e => e.preventDefault());
-    window.addEventListener('blur', () => {
-      keys.gas = false;
-      document.querySelectorAll('#controls .pressed').forEach(b => b.classList.remove('pressed'));
+    addEventListener('keyup',e=>{
+      if(gasKeys.delete(e.code))syncThumbs();
+      if(directionKeys.delete(e.code))syncKeyboard();
     });
-
-    const keymap = { ArrowUp: 'gas', Space: 'gas', KeyW: 'gas' };
-    addEventListener('keydown', e => { if (keymap[e.code]) { keys[keymap[e.code]] = true; e.preventDefault(); } });
-    addEventListener('keyup', e => { if (keymap[e.code]) keys[keymap[e.code]] = false; });
 
     let active = false;
     let speed = 0;
@@ -2815,6 +2818,7 @@
     let crashFallProgress = 0;
     function reset() {
       if(!initialSceneReady)return;
+      clearThumbControls();
       document.body.classList.remove('level-complete');
       document.body.classList.add('playing');
       progressBucket=-1;
@@ -2877,8 +2881,7 @@
       crashFallProgress = 0;
       document.body.classList.remove('playing');
       active = false;
-      keys.gas = false;
-      document.querySelectorAll('#controls .pressed').forEach(b=>b.classList.remove('pressed'));
+      clearThumbControls();
       if (elapsed > record) {
         record = elapsed;
         localStorage.setItem('wheelie-best', record.toFixed(3));
@@ -3156,6 +3159,7 @@
       const progress=document.getElementById('loadingProgress');
       const retry=document.getElementById('loadingRetry');
       const jobs=[
+        ['Guía y acelerador',loadHandlebarArt,()=>throttleArt.complete&&throttleArt.naturalWidth>0],
         ['Yamaha Raptor',loadInitialYamaha,()=>initialVehicleReady],
         ['Conductores 3D',loadCustomRider,()=>!!customRider],
         ['Árboles',loadCitrusTrees,()=>initialTreesReady],
