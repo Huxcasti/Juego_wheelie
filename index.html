@@ -651,6 +651,76 @@
       }
     }
 
+
+    // Casas 3D aportadas por el usuario: original, abandonada y dúplex.
+    // Se prepararon archivos móviles a partir de cada GLB, eliminando
+    // geometría de herrería excesivamente densa en la casa normal.
+    // No se colocan sobre la carretera y comparten geometría y textura
+    // dentro de las copias del mismo tipo para reducir memoria.
+    const houseSlots=[];
+    const houseTypes=['casa','abandonada','duplex'];
+    for(let i=0;i<5;i++)for(const side of [-1,1]){
+      const kind=(i+(side===1?1:0))%3;
+      const slot=new THREE.Group();
+      slot.name='Casa lateral · '+houseTypes[kind];
+      slot.userData.houseKind=kind;
+      slot.userData.houseIndex=i;
+      slot.userData.houseSide=side;
+      slot.position.x=side*(kind===0?23:19+(i%2)*1.8);
+      // Alternancia izquierda/derecha en diferentes puntos del mapa.
+      const z=-44-i*54+(side===1?-27:0);
+      registerScenery(slot,z);
+      houseSlots.push(slot);
+    }
+    async function loadRoadsideHouses(){
+      const names=[
+        './assets/house-casa-mobile.js',
+        './assets/house-abandoned-mobile.js',
+        './assets/house-duplex-mobile.js'
+      ];
+      const states=await Promise.all(names.map(async (url,kind)=>{
+        try{
+          if(typeof DecompressionStream!=='function')
+            throw new Error('El navegador no soporta gzip');
+          const {HOUSE_B64}=await import(url);
+          const compressed=Uint8Array.from(atob(HOUSE_B64),c=>c.charCodeAt(0));
+          const bytes=await new Response(
+            new Blob([compressed]).stream()
+              .pipeThrough(new DecompressionStream('gzip'))
+          ).arrayBuffer();
+          const gltf=await new Promise((resolve,reject)=>
+            loader.parse(bytes,'',resolve,reject));
+          const house=gltf.scene;
+          let pieces=0;
+          house.traverse(obj=>{
+            if(!obj.isMesh)return;
+            pieces++;
+            // Casas de ambiente, sin sombras dinámicas costosas para móvil.
+            obj.castShadow=false;obj.receiveShadow=false;
+          });
+          if(pieces<1)throw new Error('La casa 3D llegó vacía');
+          let count=0;
+          for(const slot of houseSlots){
+            if(slot.userData.houseKind!==kind)continue;
+            const model=house.clone(true);
+            model.name='Casa 3D '+houseTypes[kind];
+            model.rotation.y=(slot.userData.houseIndex*1.19+
+              (slot.userData.houseSide===1?Math.PI:.35))%(Math.PI*2);
+            // Todos los modelos se normalizaron sobre el terreno.
+            model.position.y=.03;
+            slot.add(model);
+            count++;
+          }
+          console.info('Casas 3D listas:',houseTypes[kind],count,'copias');
+          return count;
+        }catch(error){
+          console.warn('No pudo cargar la casa 3D '+houseTypes[kind],error);
+          return 0;
+        }
+      }));
+      console.info('Casas de escenario en ambos lados:',
+        states.reduce((a,b)=>a+b,0));
+    }
     for(let i=0;i<24;i++)for(const side of [-1,1]){
       const group=new THREE.Group(),z=-148+i*13;
       group.position.x=side*7.55;
@@ -1173,6 +1243,7 @@
     let pendingStart=false;
     loadCitrusTrees();
     loadRoadsideGrass();
+    loadRoadsideHouses();
     loadCustomRider();
 
     function normalizeImportedModel(model) {
