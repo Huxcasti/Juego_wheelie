@@ -838,6 +838,78 @@
       extraGrassReady=true;
     }
 
+    // Tercera colección: grass.glb del usuario, con geometría y UV
+    // originales. Una malla instanciada comparte textura y material.
+    let meadowGrass=null;
+    let meadowBucket=NaN;
+    const meadowPlants=[];
+    for(const side of [-1,1])for(let row=0;row<3;row++){
+      for(let i=0;i<40;i++){
+        const seed=i*37+row*53+(side===1?19:0);
+        meadowPlants.push({
+          x:side*(8.45+row*2.9+(seed%11)*.095),
+          baseZ:-154+i*7.75+row*2.1+side*1.2+(seed%7)*.24,
+          yaw:(seed*.61803398875)%(Math.PI*2),
+          scale:.55+(seed%13)*.05
+        });
+      }
+    }
+    function updateMeadowGrass(force=false){
+      if(!meadowGrass)return;
+      const bucket=Math.floor(distance/2);
+      if(!force&&bucket===meadowBucket)return;
+      meadowBucket=bucket;
+      for(let i=0;i<meadowPlants.length;i++){
+        const p=meadowPlants[i];
+        const relative=(((p.baseZ+distance+155)%310)+310)%310-155;
+        grassTransform.position.set(p.x,ground.position.y+.008,rider.position.z+relative);
+        grassTransform.rotation.set(0,p.yaw,0);
+        grassTransform.scale.setScalar(p.scale);
+        grassTransform.updateMatrix();
+        meadowGrass.setMatrixAt(i,grassTransform.matrix);
+      }
+      meadowGrass.instanceMatrix.needsUpdate=true;
+    }
+    async function loadMeadowGrass(){
+      const {NEW_GRASS_B64}=await import('./assets/grass-meadow-mobile.js?v=1');
+      const packed=Uint8Array.from(atob(NEW_GRASS_B64),ch=>ch.charCodeAt(0));
+      const raw=await new Response(new Blob([packed]).stream()
+        .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      const gltf=await new Promise((resolve,reject)=>loader.parse(raw,'',resolve,reject));
+      gltf.scene.updateMatrixWorld(true);
+      let source=null;
+      gltf.scene.traverse(obj=>{if(obj.isMesh&&!source)source=obj;});
+      if(!source||!source.geometry.getAttribute('uv'))throw new Error('Grama nueva sin malla o UV');
+      // Aplicar la orientación original de Sketchfab antes de normalizar.
+      const geometry=source.geometry.clone().applyMatrix4(source.matrixWorld);
+      geometry.computeBoundingBox();
+      const box=geometry.boundingBox;
+      const size=box.getSize(new THREE.Vector3());
+      const center=box.getCenter(new THREE.Vector3());
+      if(!Number.isFinite(size.y)||size.y<=0||Math.max(size.x,size.z)<=0)
+        throw new Error('Dimensiones de grama incorrectas');
+      geometry.translate(-center.x,-box.min.y,-center.z);
+      const factor=1.35/Math.max(size.x,size.z);
+      geometry.scale(factor,factor,factor);
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+      const material=source.material.clone();
+      material.side=THREE.DoubleSide;
+      material.alphaTest=.52;
+      material.transparent=false;
+      material.depthWrite=true;
+      material.needsUpdate=true;
+      meadowGrass=new THREE.InstancedMesh(geometry,material,meadowPlants.length);
+      meadowGrass.name='Grama adicional del GLB grass';
+      meadowGrass.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      meadowGrass.frustumCulled=false;
+      meadowGrass.castShadow=false;
+      meadowGrass.receiveShadow=false;
+      scene.add(meadowGrass);
+      updateMeadowGrass(true);
+      console.info('Grama adicional original:',meadowPlants.length,'matas');
+    }
+
     // Casas 3D aportadas por el usuario: original, abandonada y dúplex.
     // Se prepararon archivos móviles a partir de cada GLB, eliminando
     // geometría de herrería excesivamente densa en la casa normal.
@@ -3062,6 +3134,7 @@
       // El follaje bajo se reutiliza frente a la cámara continuamente.
       updateRoadsideGrass();
       updateExtraGrass();
+      updateMeadowGrass();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
@@ -3289,6 +3362,7 @@
         ['Árboles',loadCitrusTrees,()=>initialTreesReady],
         ['Grama',loadRoadsideGrass,()=>!!roadsideGrass],
         ['Grama adicional',loadExtraGrass,()=>extraGrassReady],
+        ['Grama nueva',loadMeadowGrass,()=>!!meadowGrass],
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
