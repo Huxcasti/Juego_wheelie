@@ -1965,7 +1965,21 @@
     const passengerCarTemplates=[];
     let loadedPassengerPack=false;
     let initialTrafficReady=false;
-    let nextPassengerVariant=0;
+    let passengerVariantBag=[];
+    // Fisher-Yates: cada nuevo intento y cada tanda tienen un orden nuevo.
+    function shuffleTraffic(items){
+      const shuffled=[...items];
+      for(let i=shuffled.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];
+      }
+      return shuffled;
+    }
+    function nextRandomPassengerVariant(){
+      if(!passengerVariantBag.length)
+        passengerVariantBag=shuffleTraffic(PASSENGER_NAMES.map((_,i)=>i));
+      return passengerVariantBag.pop();
+    }
 
     function makePackedPassengerCar(index){
       const template=passengerCarTemplates[index];
@@ -2084,7 +2098,7 @@
         // habilitar el inicio de la partida.
         const slots=oncomingCars.filter(car=>car.isPackPlaceholder);
         slots.forEach((car,i)=>installPassengerVariant(car,i));
-        nextPassengerVariant=slots.length;
+        passengerVariantBag=[];
         loadedPassengerPack=true;
         document.getElementById('trafficLoadError').hidden=true;
         console.info('10 vehículos originales listos:',prepared.map(x=>x.name));
@@ -2235,12 +2249,10 @@
         Math.abs(c.at-meet)<Math.abs(best.at-meet)?c:best,null);
       car.targetAt=coin?.at??meet;
       car.innerLane=coin?.lane??0;
-      if(eligible&&pass%5!==4){
-        // 2 de cada 5: permanecen en una trayectoria interior hasta pasar.
-        // Otros cruzan o cambian al carril de otra ficha, sin volver
-        // necesariamente al borde. El primero se anuncia desde el menú.
-        const mode=pass%5;
-        car.trafficMode=mode===0||mode===3?'hold':mode===1?'cross':'shift';
+      // Sortear independientemente el comportamiento de cada automóvil.
+      const mode=Math.random();
+      if(eligible&&mode<.80){
+        car.trafficMode=mode<.40?'hold':mode<.60?'cross':'shift';
         car.nearCoins=true;
         car.directCoins=true;
         if(car.trafficMode==='hold'){
@@ -2252,10 +2264,10 @@
             Math.abs(c.at-(meet+15))<Math.abs(best.at-(meet+15))?c:best,null);
           car.exitLane=next?.lane??-car.innerLane;
         }
-        car.entryStart=155;
-        car.entryEnd=92;
-        car.secondStart=88;
-        car.secondEnd=52;
+        car.entryStart=145+Math.random()*35;
+        car.entryEnd=88+Math.random()*15;
+        car.secondStart=car.entryEnd-4-Math.random()*5;
+        car.secondEnd=48+Math.random()*12;
       }
       car.lane=trafficLaneAt(car,car.ahead,at+car.ahead);
       car.group.rotation.y=0;
@@ -2336,22 +2348,23 @@
 
     function resetOncomingCars(){
       trafficPassNumber=0;
-      oncomingCars.forEach((car,i)=>{
-        car.ahead=i===5 ? 212+Math.random()*16 :
-          i===4 ? 125+Math.random()*13 :
-          i>=6 ? 264+(i-6)*46+Math.random()*12 :
-          76+i*41+i*i*2+Math.random()*10;
-        car.speed=11+Math.random()*8; // tráfico más rápido, sin aparecer de golpe
-        car.group.visible=car.modelReady===true;
-      });
-      // Separación longitudinal mínima: no crear barreras de dos carros.
-      const ordered=[...oncomingCars].sort((a,b)=>a.ahead-b.ahead);
-      let previous=-Infinity;
+      passengerVariantBag=[];
+      // Cambiar el orden real de los 12 vehículos, incluso el autobús y
+      // la camioneta. Se conservan los modelos cargados y sus dimensiones.
+      const ordered=shuffleTraffic(oncomingCars);
+      let ahead=76+Math.random()*48;
       for(const car of ordered){
-        car.ahead=Math.max(car.ahead,previous+TRAFFIC_GAP);
-        previous=car.ahead;
+        if(loadedPassengerPack&&car.isPackPlaceholder){
+          const variant=nextRandomPassengerVariant();
+          if(car.variantIndex!==variant)installPassengerVariant(car,variant);
+        }
+        car.ahead=ahead;
+        car.speed=11+Math.random()*9;
         assignTrafficLane(car,trafficPassNumber++,0);
         car.group.position.set(car.lane,0,-car.ahead);
+        car.group.visible=car.modelReady===true;
+        // Distancias distintas sin perder el margen longitudinal mínimo.
+        ahead+=TRAFFIC_GAP+Math.random()*30;
       }
     }
     function updateOncomingTraffic(dt){
@@ -2372,7 +2385,8 @@
           car.speed=11+Math.random()*9;
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
           if(loadedPassengerPack && car.isPackPlaceholder){
-            installPassengerVariant(car,nextPassengerVariant++);
+            const variant=nextRandomPassengerVariant();
+            if(car.variantIndex!==variant)installPassengerVariant(car,variant);
           }
           // El nuevo modelo puede tener otro ancho: calcular después del cambio.
           assignTrafficLane(car,trafficPassNumber++,distance);
