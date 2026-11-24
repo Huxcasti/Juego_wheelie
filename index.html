@@ -284,7 +284,7 @@
     #steering::before{content:none}
     #steering-wheel{position:absolute;inset:0;width:100%;height:100%;display:block;
       border-radius:0;transform-origin:50% 66%;pointer-events:none;
-      transition:transform .085s ease-out;will-change:transform}
+      transition:transform .035s linear;will-change:transform}
     #steering-art{position:absolute;inset:0;display:block;width:100%;height:100%;
       object-fit:fill;pointer-events:none;filter:drop-shadow(0 5px 5px #0008)}
     #throttle-art{position:absolute;left:71.1326%;top:66.087%;width:14.848%;height:31.304%;
@@ -2022,8 +2022,9 @@
     }
 
 
-    // Ambos pulgares pueden girar; cada toque conserva su propio origen.
-    // El pulgar derecho puede mantener GAS y dirigir a la vez.
+    // Dirección compartida de dos pulgares: el acelerador es independiente.
+    // El último desplazamiento intencional toma el control, sin sumar
+    // posiciones antiguas que se contrarrestan entre sí.
     const steeringEl=document.getElementById('steering');
     const steeringWheelEl=document.getElementById('steering-wheel');
     const throttleArt=document.getElementById('throttle-art');
@@ -2031,63 +2032,108 @@
     const steeringTouches=new Map();
     const gasKeys=new Set();
     const directionKeys=new Set();
+    let steeringOwner=null,thumbTurn=0;
     function setSteer(value){
       steerValue=THREE.MathUtils.clamp(value,-1,1);
       const visual=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
-      steeringWheelEl.style.transform='translateX('+(visual*3).toFixed(1)+'px) rotate('+(visual*13).toFixed(1)+'deg)';
+      steeringWheelEl.style.transform='translateX('+(visual*5).toFixed(1)+'px) rotate('+(visual*23).toFixed(1)+'deg)';
       steeringEl.setAttribute('aria-valuenow',String(Math.round(visual*100)));
     }
     function syncThumbs(){
       const values=[...steeringTouches.values()];
-      // La mano que más se mueve manda, y dos movimientos coordinados
-      // se combinan sin perder respuesta por mantener GAS quieto.
-      const left=Math.min(0,...values.map(v=>v.delta));
-      const right=Math.max(0,...values.map(v=>v.delta));
-      setSteer(left+right);
+      setSteer(thumbTurn);
       steeringEl.classList.toggle('steering-active',values.length>0);
       keys.gas=values.some(v=>v.gas)||gasKeys.size>0;
       steeringEl.classList.toggle('gas-active',keys.gas);
     }
+    function beginThumb(id,x,y){
+      if(!active||paused||!initialSceneReady||steeringTouches.has(id))return false;
+      if(steeringTouches.size>=2)return false;
+      const r=steeringEl.getBoundingClientRect();
+      const nx=(x-r.left)/r.width,ny=(y-r.top)/r.height;
+      const gas=nx>=.60&&ny>=.38;
+      steeringTouches.set(id,{lastX:x,range:Math.max(12,Math.min(32,r.width*.057)),pending:0,gas});
+      // Un toque nuevo no borra la dirección del otro.
+      syncThumbs();
+      return true;
+    }
+    function moveThumbs(samples){
+      let chosen=null;
+      for(const sample of samples){
+        const t=steeringTouches.get(sample.id);
+        if(!t)continue;
+        t.pending+=sample.x-t.lastX;
+        t.lastX=sample.x;
+        const threshold=steeringOwner===sample.id?.55:t.gas?3:1.5;
+        if(Math.abs(t.pending)<threshold)continue;
+        const priority=Math.abs(t.pending)*(steeringOwner===sample.id?1.25:t.gas?.85:1);
+        if(!chosen||priority>chosen.priority)chosen={id:sample.id,t,priority};
+      }
+      if(!chosen)return;
+      // Los dedos quietos no anulan el movimiento; girar al otro lado
+      // responde inmediatamente incluso tras haber llegado al tope.
+      steeringOwner=chosen.id;
+      thumbTurn=THREE.MathUtils.clamp(thumbTurn+chosen.t.pending/chosen.t.range,-1,1);
+      // Descartar desplazamientos viejos del dedo que no está dirigiendo.
+      for(const t of steeringTouches.values())t.pending=0;
+      syncThumbs();
+    }
+    function endThumb(id){
+      if(!steeringTouches.delete(id))return;
+      if(steeringOwner===id||!steeringTouches.size){
+        steeringOwner=null;
+        thumbTurn=0;
+        for(const t of steeringTouches.values())t.pending=0;
+      }
+      syncThumbs();
+    }
     function clearThumbControls(){
       const ids=[...steeringTouches.keys()];
       steeringTouches.clear();
+      steeringOwner=null;thumbTurn=0;
       gasKeys.clear();
       directionKeys.clear();
       keyboardSteer=0;
       syncThumbs();
-      for(const id of ids)try{
+      for(const id of ids)if(typeof id==='number')try{
         if(steeringEl.hasPointerCapture(id))steeringEl.releasePointerCapture(id);
       }catch(err){}
     }
-    steeringEl.addEventListener('pointerdown',e=>{
+    // En iOS usar eventos táctiles nativos, con un ID por pulgar.
+    // El puntero del mouse/lápiz sigue disponible sin duplicar los toques.
+    steeringEl.addEventListener('touchstart',e=>{
       if(!active||paused||!initialSceneReady)return;
-      if(e.pointerType==='mouse'&&e.button!==0)return;
-      if(steeringTouches.size>=2||steeringTouches.has(e.pointerId))return;
       e.preventDefault();
-      const r=steeringEl.getBoundingClientRect();
-      const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
-      // Zona amplia de aceleración alrededor de la palanca naranja.
-      // El resto del puño derecho también permite guiar sin acelerar.
-      const gas=x>=.65&&y>=.48;
-      steeringTouches.set(e.pointerId,{startX:e.clientX,range:Math.max(24,r.width*.115),delta:0,gas});
-      try{steeringEl.setPointerCapture(e.pointerId);}catch(err){}
-      syncThumbs();
-    });
-    steeringEl.addEventListener('pointermove',e=>{
-      const touch=steeringTouches.get(e.pointerId);
-      if(!touch)return;
+      for(const t of e.changedTouches)beginThumb('t'+t.identifier,t.clientX,t.clientY);
+    },{passive:false});
+    steeringEl.addEventListener('touchmove',e=>{
+      if(!steeringTouches.size)return;
       e.preventDefault();
-      const delta=(e.clientX-touch.startX)/touch.range;
-      touch.delta=THREE.MathUtils.clamp(Math.abs(delta)<.045?0:delta,-1,1);
-      syncThumbs();
-    });
-    for(const event of ['pointerup','pointercancel','lostpointercapture']){
+      moveThumbs(Array.from(e.changedTouches,t=>({id:'t'+t.identifier,x:t.clientX})));
+    },{passive:false});
+    for(const event of ['touchend','touchcancel']){
       steeringEl.addEventListener(event,e=>{
-        if(steeringTouches.delete(e.pointerId))syncThumbs();
-      });
+        e.preventDefault();
+        for(const t of e.changedTouches)endThumb('t'+t.identifier);
+      },{passive:false});
     }
-    steeringEl.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
-    steeringEl.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+    steeringEl.addEventListener('pointerdown',e=>{
+      if(e.pointerType==='touch'||(e.pointerType==='mouse'&&e.button!==0))return;
+      if(!beginThumb(e.pointerId,e.clientX,e.clientY))return;
+      e.preventDefault();
+      try{steeringEl.setPointerCapture(e.pointerId);}catch(err){}
+    });
+    window.addEventListener('pointermove',e=>{
+      if(e.pointerType==='touch'||!steeringTouches.has(e.pointerId))return;
+      e.preventDefault();
+      moveThumbs([{id:e.pointerId,x:e.clientX}]);
+    });
+    for(const event of ['pointerup','pointercancel']){
+      window.addEventListener(event,e=>{if(e.pointerType!=='touch')endThumb(e.pointerId);});
+    }
+    steeringEl.addEventListener('lostpointercapture',e=>{
+      if(e.pointerType!=='touch')endThumb(e.pointerId);
+    });
     async function loadHandlebarArt(){
       const {HANDLEBAR,THROTTLE}=await import('./assets/atv-handlebar-dual.js?v=dual1');
       const image=document.getElementById('steering-art');
@@ -3603,21 +3649,23 @@
         // La dirección necesita velocidad hacia delante para desplazar
         // el vehículo: transición gradual a baja velocidad y cero real
         // al detenerse (también cancela inercia lateral residual).
-        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,5,dt);
+        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,13,dt);
         const rollingSpeed=speed>.20?speed:0;
-        const traction=THREE.MathUtils.clamp(rollingSpeed/5,0,1);
-        const desiredSideSpeed=lateralMotion*(2.5+rollingSpeed*.115)*traction;
+        const traction=THREE.MathUtils.clamp(rollingSpeed/2.8,0,1);
+        const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction;
         steerVelocity=rollingSpeed===0?0:
-          THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,8,dt);
+          THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,16,dt);
         if(rollingSpeed>0){
           rider.position.x=THREE.MathUtils.clamp(
             rider.position.x+steerVelocity*dt,-4.6,4.6
           );
+          if((rider.position.x<=-4.6&&steerVelocity<0)||
+             (rider.position.x>=4.6&&steerVelocity>0))steerVelocity=0;
         }
         // El cuerpo solo gira y se inclina mientras avanza; las ruedas
         // delanteras sí pueden mostrar dirección aun estando detenido.
         rider.rotation.y=THREE.MathUtils.damp(
-          rider.rotation.y,-lateralMotion*.115*traction,6,dt
+          rider.rotation.y,-lateralMotion*.20*traction,10,dt
         );
         rider.rotation.z=THREE.MathUtils.damp(
           rider.rotation.z,-lateralMotion*.06*traction,6,dt
@@ -3676,7 +3724,7 @@
         wheelSpin = (wheelSpin + speed * dt / (.33*ATV_SCALE)) % (Math.PI * 2);
         // Gomas con giro longitudinal y giro de las delanteras al virar.
         if (realTireRotation) realTireRotation.value = wheelSpin;
-        visibleWheelSteer=THREE.MathUtils.damp(visibleWheelSteer,lateralMotion*.28,7,dt);
+        visibleWheelSteer=THREE.MathUtils.damp(visibleWheelSteer,lateralMotion*.44,13,dt);
         for (const w of importedWheelGroups) {
           w.rotation.x=wheelSpin;
           w.rotation.y=frontSteeringWheels.includes(w)?visibleWheelSteer:0;
