@@ -483,7 +483,60 @@
           tree.scale.setScalar(.88+(i%6)*.055);
           slot.add(tree);
         }
-        console.info('Árbol Citrus cargado:',treeSlots.length,'árboles');
+        // Jacarandas aportados por el usuario: sustituir aproximadamente
+        // uno de cada cuatro Citrus, sin superponer ambos en el mismo sitio.
+        // Ambos modelos comparten geometría/texturas entre sus copias.
+        // Si no carga el jacaranda se conservan TODOS los árboles Citrus.
+        let jacarandasAdded=0;
+        try{
+          const {JACARANDA_B64}=await import('./assets/jacaranda-tree-mobile.js?v=jac1');
+          const compressedJacaranda=Uint8Array.from(atob(JACARANDA_B64),
+            char=>char.charCodeAt(0));
+          const jacarandaData=await new Response(
+            new Blob([compressedJacaranda]).stream()
+              .pipeThrough(new DecompressionStream('gzip'))
+          ).arrayBuffer();
+          const jacarandaGltf=await new Promise((resolve,reject)=>
+            loader.parse(jacarandaData,'',resolve,reject)
+          );
+          const jacarandaModel=jacarandaGltf.scene;
+          let jacarandaMeshes=0;
+          jacarandaModel.traverse(obj=>{
+            if(!obj.isMesh)return;
+            jacarandaMeshes++;
+            obj.castShadow=false;
+            obj.receiveShadow=false;
+            const materials=Array.isArray(obj.material)?obj.material:[obj.material];
+            for(const m of materials){
+              if(!m)continue;
+              m.side=THREE.DoubleSide;
+              m.needsUpdate=true;
+            }
+          });
+          if(jacarandaMeshes<5)throw new Error('Jacaranda 3D incompleto');
+          // Elegir la misma proporción a ambos lados de la carretera.
+          for(const slot of treeSlots){
+            const i=slot.userData.treeIndex;
+            if(i%4!==1)continue;
+            const jacaranda=jacarandaModel.clone(true);
+            jacaranda.name='Jacaranda 3D';
+            jacaranda.position.y=.018;
+            jacaranda.rotation.y=i*.91;
+            // El modelo trae 2.53 unidades de altura, se escala
+            // a 5.5 - 6.9 m para mezclarlo con los Citrus existentes.
+            jacaranda.scale.setScalar(2.18+(i%5)*.15);
+            for(const oldTree of [...slot.children])slot.remove(oldTree);
+            slot.add(jacaranda);
+            jacarandasAdded++;
+          }
+          console.info('Jacarandas 3D añadidos:',jacarandasAdded,
+            'árboles, el resto siguen siendo Citrus.');
+        }catch(jacarandaError){
+          console.warn('Jacaranda no disponible; se mantienen los Citrus.',
+            jacarandaError);
+        }
+        console.info('Árboles 3D cargados:',treeSlots.length,
+          'en total. Jacarandas:',jacarandasAdded);
       }catch(error){
         console.error('Error cargando árbol Citrus',error);
         const errorEl=document.getElementById('trafficLoadError');
