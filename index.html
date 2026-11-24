@@ -911,6 +911,131 @@
       console.info('Platanus añadidos:',used.length);
     }
 
+    // Viento de vegetación calculado en GPU. No modificar vértices de
+    // los GLB en CPU ni crear una copia de geometría por árbol.
+    const treeWindTime={value:0};
+    const animatedTreeSlots=[];
+    const treeMaterialCache=new WeakMap();
+    const treeShadowMeshes=[];
+    let treeShadowGeometry=null,treeShadowMaterial=null;
+    function enhanceTreeMaterial(original,isLeaf){
+      if(!original)return original;
+      let variants=treeMaterialCache.get(original);
+      if(!variants){variants={};treeMaterialCache.set(original,variants);}
+      const key=isLeaf?'leaf':'wood';
+      if(variants[key])return variants[key];
+      const material=original.clone();
+      if(material.map){
+        const map=material.map;
+        map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+        map.magFilter=THREE.LinearFilter;
+        if(map.generateMipmaps!==false)map.minFilter=THREE.LinearMipmapLinearFilter;
+        map.needsUpdate=true;
+      }
+      if('roughness' in material)material.roughness=isLeaf?.86:.96;
+      if('metalness' in material)material.metalness=0;
+      material.side=THREE.DoubleSide;
+      // Conservar recortes de hojas y aprovechar MSAA para los bordes.
+      if(isLeaf&&material.alphaTest>0)material.alphaToCoverage=true;
+      if(isLeaf&&material.color)material.color.multiplyScalar(1.035);
+      material.onBeforeCompile=shader=>{
+        shader.uniforms.uTreeWindTime=treeWindTime;
+        shader.vertexShader=shader.vertexShader.replace('#include <common>',
+          '#include <common>\nuniform float uTreeWindTime;\nvarying float vTreeTone;');
+        shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`
+          #include <begin_vertex>
+          vec3 treeWorld=(modelMatrix*vec4(transformed,1.0)).xyz;
+          vec3 treeRoot=modelMatrix[3].xyz;
+          // La fase de cada árbol nace de su posición, no del fotograma.
+          float treePhase=treeRoot.x*0.37+treeRoot.z*0.19;
+          vTreeTone=sin(treePhase)*0.5+0.5;
+          float treeHeight=max(0.0,treeWorld.y);
+          float crown=smoothstep(0.18,5.8,treeHeight);
+          float lod=1.0-smoothstep(72.0,145.0,length(treeWorld.xz-cameraPosition.xz));
+          if(lod>0.005){
+            float gust=0.7+0.3*sin(uTreeWindTime*0.73+treePhase*0.43);
+            float sway=sin(uTreeWindTime*1.25+treePhase)*0.16+
+              sin(uTreeWindTime*2.13+treePhase*0.71)*0.065;
+            float flutter=${isLeaf?'sin(uTreeWindTime*6.2+dot(treeWorld,vec3(1.8,2.1,1.4)))*0.047':'0.0'};
+            vec3 shift=vec3(sway+flutter,flutter*0.26,sway*0.42-flutter*0.45)*crown*gust*lod;
+            // Convertir la brisa mundial al eje local de cada malla,
+            // conservando rotaciones y escalas originales del archivo.
+            vec3 ax=modelMatrix[0].xyz;
+            vec3 ay=modelMatrix[1].xyz;
+            vec3 az=modelMatrix[2].xyz;
+            transformed+=vec3(dot(shift,ax)/max(dot(ax,ax),0.0001),
+              dot(shift,ay)/max(dot(ay,ay),0.0001),
+              dot(shift,az)/max(dot(az,az),0.0001));
+          }
+        `);
+        shader.fragmentShader=shader.fragmentShader.replace('#include <common>',
+          '#include <common>\nvarying float vTreeTone;');
+        shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',
+          '#include <color_fragment>\n'+(isLeaf?
+            'diffuseColor.rgb *= mix(vec3(0.93,0.96,0.91),vec3(1.045,1.035,0.99),vTreeTone);':
+            'diffuseColor.rgb *= mix(0.94,1.035,vTreeTone);'));
+      };
+      material.customProgramCacheKey=()=>isLeaf?'tree-wind-leaves-v1':'tree-wind-wood-v1';
+      material.needsUpdate=true;
+      variants[key]=material;
+      return material;
+    }
+    function createTreeShadowAssets(){
+      if(treeShadowGeometry)return;
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
+      const ctx=canvas.getContext('2d');
+      if(!ctx)return;
+      const gradient=ctx.createRadialGradient(32,32,2,32,32,32);
+      gradient.addColorStop(0,'rgba(0,0,0,0.43)');
+      gradient.addColorStop(.38,'rgba(0,0,0,0.26)');
+      gradient.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=gradient;ctx.fillRect(0,0,64,64);
+      const map=new THREE.CanvasTexture(canvas);
+      treeShadowGeometry=new THREE.PlaneGeometry(1,1);
+      treeShadowMaterial=new THREE.MeshBasicMaterial({map,transparent:true,
+        depthWrite:false,opacity:.78,polygonOffset:true,polygonOffsetFactor:-1});
+    }
+    function enhanceAllTrees(){
+      createTreeShadowAssets();
+      for(const slot of landscape){
+        if(!treeSlots.includes(slot)&&slot.name!=='Platanus acerifolia')continue;
+        if(slot.userData.windEnhanced)continue;
+        const root=slot.children[0];if(!root)continue;
+        slot.userData.windEnhanced=true;
+        const seed=(slot.userData.treeIndex??Math.round(Math.abs(slot.userData.baseZ)*7+slot.position.x*3));
+        // Pequeña variedad de siluetas, sin desplazar el punto de apoyo.
+        root.scale.multiplyScalar(.96+(Math.abs(seed)%9)*.012);
+        root.scale.y*=.98+(Math.abs(seed)%5)*.018;
+        root.traverse(mesh=>{
+          if(!mesh.isMesh)return;
+          const convert=m=>{
+            const label=(mesh.name+' '+(m?.name??'')).toLowerCase();
+            const wood=/trunk|bark|wood|stem|branch|tronco|corteza|rama|tige/.test(label);
+            const leaf=!wood&&(/leaf|leaves|foliage|hoja|flower|flor|canopy|petal/.test(label)||
+              (m?.alphaTest??0)>0||m?.transparent===true||!!m?.alphaMap);
+            // Si el nombre no identifica la copa, el viento de altura
+            // sigue funcionando; solo el aleteo fino se omite.
+            return enhanceTreeMaterial(m,leaf);
+          };
+          mesh.material=Array.isArray(mesh.material)?mesh.material.map(convert):convert(mesh.material);
+          mesh.castShadow=false;mesh.receiveShadow=false;
+        });
+        animatedTreeSlots.push(slot);
+        if(treeShadowGeometry&&treeShadowMaterial){
+          const shadow=new THREE.Mesh(treeShadowGeometry,treeShadowMaterial);
+          shadow.rotation.x=-Math.PI/2;
+          const width=slot.name==='Platanus acerifolia'?5.5:4.6;
+          shadow.scale.set(width,width*.85,1);
+          shadow.position.set(.6,ground.position.y+.026,-.35);
+          slot.add(shadow);treeShadowMeshes.push(shadow);
+        }
+      }
+      console.info('Árboles con viento GPU y sombras de contacto:',animatedTreeSlots.length);
+    }
+    function updateTreeWind(dt){
+      treeWindTime.value+=Math.max(0,dt);
+    }
+
     // Grama 3D del archivo del usuario, normalizada y con textura real.
     // Un único InstancedMesh para todos los macollos: unas 7 mil caras
     // en total y una sola llamada de dibujo, apto para iPhone.
@@ -3846,6 +3971,7 @@
         rider.position.z-7.2
       );
       updateClouds(paused?0:dt);
+      updateTreeWind(paused?0:dt);
       renderer.render(scene,camera);
     }
 
@@ -3924,6 +4050,7 @@
       count.textContent='Preparando la primera imagen…';
       try{
         installPlatanusTrees();
+        enhanceAllTrees();
         installGrassFill();
         updateRoadWrap();
         updateClouds();
