@@ -769,6 +769,75 @@
     }
 
 
+    // Cuatro matas extraídas del GLB simple_grass_chunks del usuario.
+    // Instancias GPU: se conserva la geometría UV y la textura original.
+    const extraGrassBatches=[];
+    let extraGrassReady=false;
+    let extraGrassBucket=NaN;
+    function updateExtraGrass(force=false){
+      if(!extraGrassBatches.length)return;
+      const bucket=Math.floor(distance/2);
+      if(!force&&bucket===extraGrassBucket)return;
+      extraGrassBucket=bucket;
+      for(const batch of extraGrassBatches){
+        for(let i=0;i<batch.plants.length;i++){
+          const p=batch.plants[i];
+          const relative=(((p.baseZ+distance+155)%310)+310)%310-155;
+          grassTransform.position.set(p.x,ground.position.y+.008,rider.position.z+relative);
+          grassTransform.rotation.set(0,p.yaw,0);
+          grassTransform.scale.setScalar(p.scale);
+          grassTransform.updateMatrix();
+          batch.mesh.setMatrixAt(i,grassTransform.matrix);
+        }
+        batch.mesh.instanceMatrix.needsUpdate=true;
+      }
+    }
+    async function loadExtraGrass(){
+      const {GRASS_CHUNKS_B64}=await import('./assets/grass-chunks-mobile.js?v=1');
+      const compressed=Uint8Array.from(atob(GRASS_CHUNKS_B64),c=>c.charCodeAt(0));
+      const raw=await new Response(new Blob([compressed]).stream()
+        .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      const gltf=await new Promise((resolve,reject)=>loader.parse(raw,'',resolve,reject));
+      const sources=[];
+      gltf.scene.traverse(o=>{if(o.isMesh)sources.push(o);});
+      if(sources.length!==4)throw new Error('Grama adicional: se esperaban cuatro matas');
+      const placements=Array.from({length:sources.length},()=>[]);
+      for(const side of [-1,1])for(let strip=0;strip<3;strip++){
+        for(let i=0;i<72;i++){
+          const seed=i*37+strip*19+(side===1?11:0);
+          const variant=(i+strip+(side===1?2:0))%sources.length;
+          placements[variant].push({
+            x:side*(8.25+strip*2.55+(Math.sin(seed*1.71)+1)*.66),
+            baseZ:-153+i*(310/72)+strip*1.35+Math.sin(seed*.91)*.9,
+            yaw:seed*2.39996%(Math.PI*2),
+            scale:1.1+(seed%8)*.10
+          });
+        }
+      }
+      for(let j=0;j<sources.length;j++){
+        const source=sources[j];
+        if(!source.geometry?.getAttribute('uv')||!source.material?.map)
+          throw new Error('Grama adicional sin textura');
+        const material=source.material.clone();
+        material.alphaTest=.35;
+        material.transparent=false;
+        material.side=THREE.DoubleSide;
+        material.depthWrite=true;
+        material.needsUpdate=true;
+        const plants=placements[j];
+        const mesh=new THREE.InstancedMesh(source.geometry,material,plants.length);
+        mesh.name='Grama original adicional '+j;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.frustumCulled=false;
+        mesh.castShadow=false;
+        mesh.receiveShadow=false;
+        scene.add(mesh);
+        extraGrassBatches.push({mesh,plants});
+      }
+      updateExtraGrass(true);
+      extraGrassReady=true;
+    }
+
     // Casas 3D aportadas por el usuario: original, abandonada y dúplex.
     // Se prepararon archivos móviles a partir de cada GLB, eliminando
     // geometría de herrería excesivamente densa en la casa normal.
@@ -1956,8 +2025,8 @@
       }
     }
 
-    // Los carros continúan pasando cerca, pero nunca por los carriles
-    // interiores reservados para recoger chapitas en este mapa.
+    // Tráfico exterior, aproximaciones suaves y algunos carros que
+    // avanzan de frente por la línea de chapitas antes de apartarse.
     const carLanes = [-4.05,4.05];
     const COIN_LANE_X=1.02;
     const COIN_PICKUP_WIDTH=.72;
@@ -1966,29 +2035,38 @@
     function chooseTrafficLane(car,pass,coinSide){
       const side=coinSide===-1?-1:1;
       const outer=carLanes[side===-1?0:1];
-      const close=car.isPackPlaceholder && !car.isBus && !car.isTruck &&
-        pass%3!==2;
+      const eligible=car.isPackPlaceholder&&!car.isBus&&!car.isTruck;
+      const direct=eligible&&pass%4===0;
+      const close=eligible&&pass%3!==2;
       const clearance=(car.collisionHalfWidth??1.325)+playerHalfWidth;
-      // Acercamiento moderado: nunca invadir el centro de una moneda.
       const inner=side*Math.min(Math.abs(outer),
         Math.max(2.95,COIN_LANE_X+clearance+CLOSE_TRAFFIC_MARGIN));
-      return {outer,inner:close?inner:outer,
-        nearCoins:close&&Math.abs(outer-inner)>.1};
+      return {outer,inner:direct?side*COIN_LANE_X:close?inner:outer,
+        direct,nearCoins:direct||(close&&Math.abs(outer-inner)>.1)};
     }
-    // Aproximarse suavemente mientras aún queda distancia y abrir
-    // espacio antes del cruce. A 60 m ya está completamente fuera.
     function trafficLaneAt(car,ahead){
       const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
-      const amount=smooth((155-ahead)/55)*smooth((ahead-60)/35);
+      // Directos: llegan a la línea de monedas a 100 m; la siguen
+      // hasta 78 m y salen progresivamente, completamente fuera a 32 m.
+      // No teletransportar, ni ocupar la moneda en el momento del cruce.
+      const amount=car.directCoins?
+        smooth((180-ahead)/80)*smooth((ahead-32)/46):
+        smooth((155-ahead)/55)*smooth((ahead-60)/35);
       return car.outerLane+(car.innerLane-car.outerLane)*amount;
     }
     function assignTrafficLane(car,pass,at){
       const meet=at+Math.max(0,car.ahead)*18/(18+car.speed);
-      const coinIndex=Math.max(0,Math.round((meet-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING));
+      const direct=car.isPackPlaceholder&&!car.isBus&&!car.isTruck&&pass%4===0;
+      // Elegir la línea de monedas del tramo que el carro recorrerá
+      // mientras todavía esté delante del jugador.
+      const predictedCoin=direct?meet+62:meet;
+      const coinIndex=Math.max(0,Math.min(LEVEL_TOTAL_COINS-1,
+        Math.round((predictedCoin-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)));
       const side=Math.floor(coinIndex/6)%2===0?-1:1;
       const placement=chooseTrafficLane(car,pass,side);
       car.outerLane=placement.outer;
       car.innerLane=placement.inner;
+      car.directCoins=placement.direct;
       car.nearCoins=placement.nearCoins;
       car.lane=trafficLaneAt(car,car.ahead);
       car.group.rotation.y=0;
@@ -2116,11 +2194,14 @@
           finish('traffic');return;
         }
       }
-      if(active && nearest<45){
+      if(active && nearest<(nearestCar?.directCoins?95:45)){
         warnEl.classList.add('visible');
-        warnEl.textContent='🚗 TRÁFICO DE FRENTE · '+Math.ceil(nearest)+' m';
-        if(nearest<15 && tilt<1.4)messageEl.textContent=nearestCar?.nearCoins?
-          '¡CUIDADO AL RECOGER CHAPITAS!':'¡ESQUIVA EL CARRO!';
+        const inCoinLane=nearestCar?.directCoins&&nearest>32;
+        warnEl.textContent=(inCoinLane?'🚗 CARRO HACIA CHAPITAS · ':
+          '🚗 TRÁFICO DE FRENTE · ')+Math.ceil(nearest)+' m';
+        if(tilt<1.4&&(inCoinLane||nearest<15))
+          messageEl.textContent=inCoinLane?'¡PREPÁRATE PARA ESQUIVAR!':
+            nearestCar?.nearCoins?'¡CUIDADO AL RECOGER CHAPITAS!':'¡ESQUIVA EL CARRO!';
       }
     }
     resetOncomingCars();
@@ -2980,6 +3061,7 @@
       }
       // El follaje bajo se reutiliza frente a la cámara continuamente.
       updateRoadsideGrass();
+      updateExtraGrass();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
@@ -3206,6 +3288,7 @@
         ['Conductores 3D',loadCustomRider,()=>!!customRider],
         ['Árboles',loadCitrusTrees,()=>initialTreesReady],
         ['Grama',loadRoadsideGrass,()=>!!roadsideGrass],
+        ['Grama adicional',loadExtraGrass,()=>extraGrassReady],
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
