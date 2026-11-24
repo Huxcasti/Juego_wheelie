@@ -2099,48 +2099,76 @@
 
     // Tráfico exterior, aproximaciones suaves y algunos carros que
     // avanzan de frente por la línea de chapitas antes de apartarse.
-    const carLanes = [-4.05,4.05];
-    const COIN_LANE_X=1.02;
+    const carLanes = [-4.45,4.45];
     const COIN_PICKUP_WIDTH=.72;
-    const CLOSE_TRAFFIC_MARGIN=.52;
     let trafficPassNumber=0;
-    function chooseTrafficLane(car,pass,coinSide){
-      const side=coinSide===-1?-1:1;
-      const outer=carLanes[side===-1?0:1];
-      const eligible=car.isPackPlaceholder&&!car.isBus&&!car.isTruck;
-      const direct=eligible&&pass%4===0;
-      const close=eligible&&pass%3!==2;
-      const clearance=(car.collisionHalfWidth??1.325)+playerHalfWidth;
-      const inner=side*Math.min(Math.abs(outer),
-        Math.max(2.95,COIN_LANE_X+clearance+CLOSE_TRAFFIC_MARGIN));
-      return {outer,inner:direct?side*COIN_LANE_X:close?inner:outer,
-        direct,nearCoins:direct||(close&&Math.abs(outer-inner)>.1)};
+    // Una ruta de fichas fija por nivel, con variedad y cambios de lado
+    // progresivos. Los conos no deben bloquear el centro de una ficha.
+    function buildCoinRoute(){
+      const pattern=[-1.85,-.95,.15,1.25,1.9,1.45,.45,-.65,
+        -1.7,-1.1,0,1.1,1.8,.8,-.25,-1.35];
+      const offsets=[0,1.5,-1,1,0,-1.5,1,-.5];
+      const route=Array.from({length:LEVEL_TOTAL_COINS},(_,i)=>{
+        const at=LEVEL_FIRST_COIN+i*LEVEL_COIN_SPACING+
+          (i===0||i===LEVEL_TOTAL_COINS-1?0:offsets[i%offsets.length]);
+        let lane=pattern[i%pattern.length];
+        // Evitar el lateral ocupado por conos y suavizar la trayectoria
+        // de las fichas vecinas antes y después de cada obstáculo.
+        for(const o of obstacles){
+          if(o.kind!=='conos')continue;
+          const phase=((at+o.baseZ+trackLength*.5)%trackLength+trackLength)%trackLength-trackLength*.5;
+          const proximity=Math.max(0,1-Math.abs(phase)/20);
+          const side=Math.sign(o.group.position.x);
+          if(lane*side>0)lane*=1-proximity;
+        }
+        return {at,lane};
+      });
+      // Mantener un desplazamiento alcanzable incluso a 24 m/s.
+      for(let i=1;i<route.length;i++){
+        const prev=route[i-1],p=route[i],limit=(p.at-prev.at)*.115;
+        p.lane=Math.max(prev.lane-limit,Math.min(prev.lane+limit,p.lane));
+      }
+      for(let i=route.length-2;i>=0;i--){
+        const p=route[i],next=route[i+1],limit=(next.at-p.at)*.115;
+        p.lane=Math.max(next.lane-limit,Math.min(next.lane+limit,p.lane));
+      }
+      return route;
     }
-    function trafficLaneAt(car,ahead){
+    const coinRoute=buildCoinRoute();
+    function trafficLaneAt(car,ahead,worldAt){
       const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
-      // Directos: llegan a la línea de monedas a 100 m; la siguen
-      // hasta 78 m y salen progresivamente, completamente fuera a 32 m.
-      // No teletransportar, ni ocupar la moneda en el momento del cruce.
-      const amount=car.directCoins?
-        smooth((180-ahead)/80)*smooth((ahead-32)/46):
-        smooth((155-ahead)/55)*smooth((ahead-60)/35);
-      return car.outerLane+(car.innerLane-car.outerLane)*amount;
+      if(!car.nearCoins)return car.exitLane;
+      // Ruta anclada a una ficha concreta del mundo, no al jugador.
+      // El giro empieza lejos y finaliza antes de alcanzar al FourTrax.
+      const entry=smooth((car.targetAt+58-worldAt)/48);
+      const departure=smooth((car.targetAt-8-worldAt)/37);
+      const approaching=car.startLane+(car.innerLane-car.startLane)*entry;
+      const routed=approaching+(car.exitLane-approaching)*departure;
+      // Prioridad a un tiempo de reacción justo. Si el jugador acelera,
+      // la salida de la zona de monedas sigue ocurriendo a tiempo.
+      const clear=smooth((ahead-42)/40);
+      return car.exitLane+(routed-car.exitLane)*clear;
     }
     function assignTrafficLane(car,pass,at){
-      const meet=at+Math.max(0,car.ahead)*18/(18+car.speed);
-      const direct=car.isPackPlaceholder&&!car.isBus&&!car.isTruck&&pass%4===0;
-      // Elegir la línea de monedas del tramo que el carro recorrerá
-      // mientras todavía esté delante del jugador.
-      const predictedCoin=direct?meet+62:meet;
-      const coinIndex=Math.max(0,Math.min(LEVEL_TOTAL_COINS-1,
-        Math.round((predictedCoin-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)));
-      const side=Math.floor(coinIndex/6)%2===0?-1:1;
-      const placement=chooseTrafficLane(car,pass,side);
-      car.outerLane=placement.outer;
-      car.innerLane=placement.inner;
-      car.directCoins=placement.direct;
-      car.nearCoins=placement.nearCoins;
-      car.lane=trafficLaneAt(car,car.ahead);
+      const eligible=car.isPackPlaceholder&&!car.isBus&&!car.isTruck;
+      const startSide=pass%2===0?-1:1;
+      const direct=eligible&&car.ahead>=100&&pass%3!==2;
+      const cross=direct&&pass%4===0;
+      const exitSide=cross?-startSide:startSide;
+      car.startLane=carLanes[startSide===-1?0:1];
+      car.exitLane=carLanes[exitSide===-1?0:1];
+      const spawnAt=at+car.ahead;
+      // Elegir una ficha que el coche puede alcanzar antes del encuentro,
+      // suponiendo que el jugador circula a su velocidad máxima.
+      const target=spawnAt-car.ahead*car.speed/(24+car.speed)*.38;
+      const candidates=coinRoute.filter(c=>c.at<=spawnAt-4&&c.at>=at+25);
+      const coin=candidates.reduce((best,c)=>!best||
+        Math.abs(c.at-target)<Math.abs(best.at-target)?c:best,null);
+      car.targetAt=coin?.at??spawnAt;
+      car.innerLane=coin?.lane??0;
+      car.nearCoins=direct&&!!coin;
+      car.directCoins=car.nearCoins;
+      car.lane=trafficLaneAt(car,car.ahead,spawnAt);
       car.group.rotation.y=0;
     }
     // "Autobus ABCO" por BgirlKittyEmo, CC BY 4.0 (Sketchfab).
@@ -2225,16 +2253,29 @@
           i>=6 ? 264+(i-6)*46+Math.random()*12 :
           54+i*41+i*i*2+Math.random()*10;
         car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
-        assignTrafficLane(car,trafficPassNumber++,0);
-        car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=car.modelReady===true;
       });
+      // Separación longitudinal mínima: no crear barreras de dos carros.
+      const ordered=[...oncomingCars].sort((a,b)=>a.ahead-b.ahead);
+      let previous=-Infinity;
+      for(const car of ordered){
+        car.ahead=Math.max(car.ahead,previous+27);
+        previous=car.ahead;
+        assignTrafficLane(car,trafficPassNumber++,0);
+        car.group.position.set(car.lane,0,-car.ahead);
+      }
     }
     function updateOncomingTraffic(dt){
       let nearest=Infinity,nearestCar=null;
-      for(const car of oncomingCars){
-        if(!car.modelReady)continue; // Sin modelo = sin dibujo ni colisión.
-        car.ahead -= (speed + car.speed)*dt;
+      const ordered=oncomingCars.filter(c=>c.modelReady).sort((a,b)=>a.ahead-b.ahead);
+      let leadingAhead=-Infinity;
+      for(const car of ordered){
+        const oldAhead=car.ahead;
+        // Los autos viajan en la misma dirección: no atravesarse unos
+        // a otros cuando coinciden en un cambio de carril.
+        car.ahead=Math.min(oldAhead,Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+27));
+        const actualSpeed=Math.max(0,(oldAhead-car.ahead)/Math.max(.001,dt)-speed);
+        leadingAhead=car.ahead;
         if(car.ahead < -Math.max(16,car.collisionHalfLength||2)){
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
           car.ahead=farthest+38+Math.random()*26;
@@ -2247,14 +2288,14 @@
           assignTrafficLane(car,trafficPassNumber++,distance);
         }
         const previousLane=car.lane;
-        car.lane=trafficLaneAt(car,car.ahead);
+        car.lane=trafficLaneAt(car,car.ahead,distance+car.ahead);
         car.group.position.set(car.lane,0,rider.position.z-car.ahead);
         // Pequeño giro visual coherente con el desplazamiento lateral.
-        const heading=Math.atan2(car.lane-previousLane,Math.max(.001,car.speed*dt));
+        const heading=Math.atan2(car.lane-previousLane,Math.max(.001,actualSpeed*dt));
         car.group.rotation.y=THREE.MathUtils.damp(car.group.rotation.y,
           THREE.MathUtils.clamp(heading,-.12,.12),7,dt);
         for(const tire of car.rolling)
-          tire.rotation.x+=car.speed*dt/(car.wheelRadius||.30);
+          tire.rotation.x+=actualSpeed*dt/(car.wheelRadius||.30);
         if(car.ahead>0&&car.ahead<nearest){nearest=car.ahead;nearestCar=car;}
         // Extensiones físicas de ambos vehículos, no solo las del carro.
         const length=(car.collisionHalfLength ??
@@ -2266,14 +2307,13 @@
           finish('traffic');return;
         }
       }
-      if(active && nearest<(nearestCar?.directCoins?95:45)){
+      if(active && nearest<(nearestCar?.directCoins?115:45)){
         warnEl.classList.add('visible');
-        const inCoinLane=nearestCar?.directCoins&&nearest>32;
-        warnEl.textContent=(inCoinLane?'🚗 CARRO HACIA CHAPITAS · ':
+        const inCoinLane=nearestCar?.directCoins&&nearest>42;
+        warnEl.textContent=(inCoinLane?'🚗 CAMBIO DE CARRIL · ':
           '🚗 TRÁFICO DE FRENTE · ')+Math.ceil(nearest)+' m';
         if(tilt<1.4&&(inCoinLane||nearest<15))
-          messageEl.textContent=inCoinLane?'¡PREPÁRATE PARA ESQUIVAR!':
-            nearestCar?.nearCoins?'¡CUIDADO AL RECOGER CHAPITAS!':'¡ESQUIVA EL CARRO!';
+          messageEl.textContent=inCoinLane?'¡PREPÁRATE PARA ESQUIVAR!':'¡ESQUIVA EL CARRO!';
       }
     }
     resetOncomingCars();
@@ -2455,7 +2495,8 @@
           ((car.collisionHalfLength||1.5)+playerHalfLength))/relativeSpeed;
         if(encounter>4.3)continue;
         const predicted=atTime(encounter);
-        const futureLane=trafficLaneAt(car,car.ahead-encounter*relativeSpeed);
+        const futureLane=trafficLaneAt(car,car.ahead-encounter*relativeSpeed,
+          distance+car.ahead-encounter*car.speed);
         const clearance=Math.abs(predicted-futureLane);
         const safeWidth=(car.collisionHalfWidth ??
           (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth+.12;
@@ -2821,8 +2862,8 @@
       if(!batch || batch.count>=COIN_BATCH_SIZE)batch=newCoinBatch();
       const i=coins.length;
       const coin={
-        // Cambios de lado por grupos: tiempo real para maniobrar.
-        at,lane:Math.floor(i/6)%2===0?-COIN_LANE_X:COIN_LANE_X,
+        // Cada ficha tiene una posición propia dentro de la carretera.
+        at,lane:coinRoute[i].lane,
         batch,slot:batch.count,collected:false,pickupTime:null
       };
       batch.count++;
@@ -2833,9 +2874,10 @@
     }
     function ensureCoinsAhead(traveled){
       const limit=Math.min(traveled+COIN_LOOKAHEAD,LEVEL_LAST_COIN);
-      while(nextCoinAt<=limit){
+      while(coins.length<coinRoute.length&&coinRoute[coins.length].at<=limit){
+        nextCoinAt=coinRoute[coins.length].at;
         spawnCoin(nextCoinAt);
-        nextCoinAt+=COIN_SPACING;
+        nextCoinAt=coinRoute[coins.length]?.at??Infinity;
       }
     }
     function resetCoins(){
@@ -2856,7 +2898,7 @@
       // Continuar generando nuevas chapitas más adelante sin mover las
       // que el jugador ya dejó atrás.
       if(active)ensureCoinsAhead(distance);
-      const first=Math.max(0,Math.floor((distance-55-24)/COIN_SPACING));
+      const first=Math.max(0,Math.floor((distance-60-LEVEL_FIRST_COIN)/COIN_SPACING));
       for(let i=first;i<coins.length;i++){
         const coin=coins[i];
         const ahead=coin.at-distance;
