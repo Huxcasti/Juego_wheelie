@@ -960,8 +960,8 @@
     }
     function updateObstacleGameplay(dt) {
       positionObstacles(distance);
-      const frontHeight=obstacleHeightAt(rider.position.z-vehicleLength*.35,rider.position.x);
-      const rearHeight=obstacleHeightAt(rider.position.z+rearAxleZ*.9,rider.position.x);
+      const frontHeight=obstacleHeightAt(rider.position.z-vehicleLength*.35*ATV_SCALE,rider.position.x);
+      const rearHeight=obstacleHeightAt(rider.position.z+rearAxleZ*.9*ATV_SCALE,rider.position.x);
       const surfaceHeight=Math.max(frontHeight,rearHeight);
       // Con wheelie se apoya atrás. La altura se resuelve solo UNA vez.
       surfaceContactHeight=tilt>.18?rearHeight:surfaceHeight;
@@ -969,8 +969,8 @@
       if(surfaceHeight>.04)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
       for(const o of obstacles){
         if(o.kind!=='conos'||o.hit)continue;
-        const inZ=Math.abs(o.group.position.z-rider.position.z)<.85;
-        const inX=Math.abs(o.group.position.x-rider.position.x)<1.35;
+        const inZ=Math.abs(o.group.position.z-rider.position.z)<.85*ATV_SCALE;
+        const inX=Math.abs(o.group.position.x-rider.position.x)<.65+playerHalfWidth;
         if(inZ&&inX){
           o.hit=true;
           finish('cones');
@@ -989,6 +989,12 @@
     }
     positionObstacles(0);
 
+    // Escala uniforme de ambos ATV: conserva conductor, asiento, ejes,
+    // pivote del wheelie y proporciones de la geometría original.
+    const ATV_SCALE=.82;
+    const PASSENGER_SCALE=1.08;
+    let playerHalfWidth=.65;
+    let playerHalfLength=1.0;
     const rider = new THREE.Group();
     scene.add(rider);
     const rearPivot = new THREE.Group();
@@ -1749,14 +1755,20 @@
       realCar.rotation.y=template.name==='Coupe'?-0.309:Math.PI;
       group.name='Carro original · '+template.name;
       group.add(realCar);
+      // Medir ya orientado (incluye el giro especial del Coupé).
+      group.updateMatrixWorld(true);
+      const size=new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+      // Aumentar los carros, limitando su ancho para que sigan en su carril.
+      const factor=Math.min(PASSENGER_SCALE,2.65/size.x);
+      group.scale.setScalar(factor);
       const rolling=[];
       realCar.traverse(obj=>{
         if(obj.isMesh && obj.userData.trafficWheel)rolling.push(obj);
       });
       return {
-        group,rolling,wheelRadius:template.wheelRadius,
-        collisionHalfWidth:template.collisionHalfWidth,
-        collisionHalfLength:template.collisionHalfLength,
+        group,rolling,wheelRadius:template.wheelRadius*factor,
+        collisionHalfWidth:size.x*factor*.5,
+        collisionHalfLength:size.z*factor*.5,
         passengerType:template.name
       };
     }
@@ -1909,8 +1921,10 @@
         scene.add(group);
         existing.group=group;
         existing.rolling=[];
-        existing.collisionHalfLength=size.z*.5+.14;
-        existing.collisionHalfWidth=size.x*.5+.22;
+        const truckScale=Math.min(1.07,2.65/size.x);
+        group.scale.setScalar(truckScale);
+        existing.collisionHalfLength=size.z*truckScale*.5;
+        existing.collisionHalfWidth=size.x*truckScale*.5;
         existing.modelReady=true;
         group.visible=true;
         console.info('Camioneta 1970 auténtica cargada',
@@ -1924,7 +1938,7 @@
 
     // Los carros continúan pasando cerca, pero nunca por los carriles
     // interiores reservados para recoger chapitas en este mapa.
-    const carLanes = [-3.45,3.45];
+    const carLanes = [-3.75,3.75];
     // "Autobus ABCO" por BgirlKittyEmo, CC BY 4.0 (Sketchfab).
     // Modelo GLB original aportado por el usuario; versión optimizada
     // con el interior de menor detalle y servida comprimida en GitHub.
@@ -1955,7 +1969,7 @@
         }
         // El GLB apunta hacia +Z, igual que el tráfico de frente.
         // Mantener las proporciones de un autobús real, no aplastarlo.
-        const factor=2.46/size.x;
+        const factor=2.65/size.x;
         model.scale.multiplyScalar(factor);
         model.updateWorldMatrix(true,true);
         bounds.setFromObject(model);
@@ -1984,8 +1998,8 @@
         scene.add(group);
         existing.group=group;
         existing.rolling=[]; // Las gomas pertenecen a la malla real.
-        existing.collisionHalfLength=dimensions.z*.5+.24;
-        existing.collisionHalfWidth=dimensions.x*.5+.38;
+        existing.collisionHalfLength=dimensions.z*.5;
+        existing.collisionHalfWidth=dimensions.x*.5;
         existing.modelLoaded=true;
         existing.modelReady=true;
         existing.group.visible=true;
@@ -2030,10 +2044,11 @@
         for(const tire of car.rolling)
           tire.rotation.x+=car.speed*dt/(car.wheelRadius||.30);
         if(car.ahead > 0)nearest=Math.min(nearest,car.ahead);
-        const length=car.collisionHalfLength ??
-          (car.isBus?3.0:car.isTruck?2.75:1.9);
-        const width=car.collisionHalfWidth ??
-          (car.isBus?1.85:car.isTruck?1.87:1.57);
+        // Extensiones físicas de ambos vehículos, no solo las del carro.
+        const length=(car.collisionHalfLength ??
+          (car.isBus?3.0:car.isTruck?2.75:1.9))+playerHalfLength;
+        const width=(car.collisionHalfWidth ??
+          (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth;
         if(car.ahead>-length && car.ahead<length &&
           Math.abs(car.lane-rider.position.x)<width) {
           finish('traffic');return;
@@ -2221,12 +2236,12 @@
         if(ahead < -4 || ahead > 125)continue;
         const relativeSpeed=Math.max(5,speed)+car.speed;
         const encounter=Math.max(0,ahead-
-          (car.collisionHalfLength||1.5))/relativeSpeed;
+          ((car.collisionHalfLength||1.5)+playerHalfLength))/relativeSpeed;
         if(encounter>4.3)continue;
         const predicted=atTime(encounter);
         const clearance=Math.abs(predicted-car.lane);
-        const safeWidth=car.collisionHalfWidth ??
-          (car.isBus?1.95:car.isTruck?1.94:1.71);
+        const safeWidth=(car.collisionHalfWidth ??
+          (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth+.12;
         // Penalización alta por colisión prevista en el momento del cruce.
         if(clearance<safeWidth){
           risk+=1100+(4.3-encounter)*110;
@@ -2318,8 +2333,8 @@
         }
       }
       const approachingBump=bumpAhead<15 && bumpAhead>-4;
-      const frontHeight=obstacleHeightAt(botZ-.83,rival.group.position.x);
-      const rearHeight=obstacleHeightAt(botZ+.83,rival.group.position.x);
+      const frontHeight=obstacleHeightAt(botZ-.83*ATV_SCALE,rival.group.position.x);
+      const rearHeight=obstacleHeightAt(botZ+.83*ATV_SCALE,rival.group.position.x);
       const groundRise=Math.max(frontHeight,rearHeight);
       rival.group.position.y=THREE.MathUtils.damp(
         rival.group.position.y,groundRise,9,dt
@@ -2364,7 +2379,7 @@
         rival.bike.rotation.z,-rivalAI.steering*.03,6,dt
       );
       const tireSpeed=approachingBump?.72:1;
-      rival.wheelSpin-=dt*Math.max(speed,5)*tireSpeed/.43;
+      rival.wheelSpin-=dt*Math.max(speed,5)*tireSpeed/(.43*ATV_SCALE);
       for(const wheel of rival.wheels){
         wheel.rotation.x=rival.wheelSpin;
         wheel.rotation.y=rival.frontWheels.includes(wheel)?
@@ -2941,7 +2956,7 @@
           map:texture,transparent:true,opacity:.43,depthWrite:false,
           polygonOffset:true,polygonOffsetFactor:-1
         });
-        const mesh=new THREE.Mesh(new THREE.PlaneGeometry(.88,1.25),material);
+        const mesh=new THREE.Mesh(new THREE.PlaneGeometry(.88*ATV_SCALE,1.25*ATV_SCALE),material);
         mesh.rotation.x=-Math.PI/2;
         mesh.renderOrder=2;scene.add(mesh);
         contactShadows.push({mesh,front,side});
@@ -2951,9 +2966,9 @@
       const rise=THREE.MathUtils.clamp(tilt/1.45,0,1);
       for(const item of contactShadows){
         item.mesh.position.set(
-          rider.position.x+item.side*.80,
+          rider.position.x+item.side*.80*ATV_SCALE,
           surfaceContactHeight+.023,
-          rider.position.z+(item.front?-.75:.75)
+          rider.position.z+(item.front?-.75:.75)*ATV_SCALE
         );
         item.mesh.material.opacity=item.front?.43*(1-rise*.93):.51;
       }
@@ -2967,7 +2982,7 @@
         // Contacto estable usando centro/radio de ambas gomas traseras.
         // No depende de la bounding box de mallas que están girando.
         minY=Math.min(...rearContactWheels.map(({mesh,radius})=>
-          mesh.getWorldPosition(new THREE.Vector3()).y-radius));
+          mesh.getWorldPosition(new THREE.Vector3()).y-radius*ATV_SCALE));
       }else{
         tmpBox.setFromObject(importedModel || vehicle);
         minY=tmpBox.min.y;
@@ -3073,7 +3088,7 @@
           scorePill.classList.remove('extreme');
         }
 
-        wheelSpin = (wheelSpin + speed * dt / 0.33) % (Math.PI * 2);
+        wheelSpin = (wheelSpin + speed * dt / (.33*ATV_SCALE)) % (Math.PI * 2);
         // Gomas con giro longitudinal y giro de las delanteras al virar.
         if (realTireRotation) realTireRotation.value = wheelSpin;
         visibleWheelSteer=THREE.MathUtils.damp(visibleWheelSteer,lateralMotion*.28,7,dt);
@@ -3185,6 +3200,17 @@
         return;
       }
       if(avatar)avatar.visible=false;
+      // Normalizar primero, escalar al final: las mediciones de los
+      // ejes y radios durante loadFourtrax permanecen en unidades locales.
+      const atvSize=new THREE.Box3().setFromObject(importedModel).getSize(new THREE.Vector3());
+      playerHalfWidth=atvSize.x*ATV_SCALE*.5;
+      playerHalfLength=atvSize.z*ATV_SCALE*.5;
+      rider.scale.setScalar(ATV_SCALE);
+      rival.group.scale.setScalar(ATV_SCALE);
+      rider.updateMatrixWorld(true);
+      rival.group.updateMatrixWorld(true);
+      console.info('Escala ATV:',ATV_SCALE,'tamaño final:',
+        atvSize.x*ATV_SCALE,atvSize.z*ATV_SCALE);
       status.textContent='Escenario listo';
       count.textContent='Preparando la primera imagen…';
       try{
