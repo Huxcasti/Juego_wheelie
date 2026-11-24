@@ -284,8 +284,8 @@
   </div>
 
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
-  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/24</span></div>
-  <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 336 m</div>
+  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
+  <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 1200 m</div>
   <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
   <div id="coinPopLayer" aria-hidden="true"></div>
   <a id="bus3DCredit" href="https://sketchfab.com/3d-models/autobus-abco-852a63f852584448a49d643ae944506e"
@@ -301,7 +301,7 @@
     <div id="levelResultCard">
       <h2 id="levelResultTitle">¡MAPA 1 COMPLETADO!</h2>
       <div id="levelStars" aria-label="Estrellas obtenidas">☆☆☆</div>
-      <p id="levelCoinResult">0 / 24 chapitas</p>
+      <p id="levelCoinResult">0 / 96 chapitas</p>
       <p id="levelResultHint">Recoge todas las chapitas para conseguir 3 estrellas.</p>
       <button id="levelRetry" type="button">JUGAR OTRA VEZ</button>
     </div>
@@ -518,11 +518,16 @@
     /* Badenes, lomos y conos en el recorrido: se reciclan por delante del jugador. */
     const obstacles = [];
     const trackLength = 310;
-    // El primer mapa termina en una meta real. Hay exactamente 24 chapitas.
-    const LEVEL_LENGTH = 336;
+    // Mapa 1 ampliado a 1.2 km. Meta real y 96 chapitas repartidas
+    // uniformemente por todo el recorrido; 3 estrellas requieren todas.
+    // Mantener un espacio libre entre la última chapita y la meta.
+    const LEVEL_LENGTH = 1200;
     const LEVEL_FIRST_COIN = 24;
-    const LEVEL_LAST_COIN = 300;
-    const LEVEL_TOTAL_COINS = 24;
+    const LEVEL_LAST_COIN = 1164;
+    const LEVEL_COIN_SPACING = 12;
+    const LEVEL_TOTAL_COINS = Math.floor(
+      (LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING
+    )+1;
     const warnEl = document.getElementById('roadAlert');
     // Altura de la superficie bajo las ruedas; cero en asfalto plano.
     let surfaceContactHeight = 0;
@@ -2050,7 +2055,7 @@
     // InstancedMesh mantiene el rendimiento incluso en recorridos largos.
     const COIN_POINTS = 25;
     const COIN_COLLECT_DURATION = .34;
-    const COIN_SPACING = 12;
+    const COIN_SPACING = LEVEL_COIN_SPACING;
     const COIN_BATCH_SIZE = 128;
     const COIN_LOOKAHEAD = 230;
     const coinGold=new THREE.MeshStandardMaterial({
