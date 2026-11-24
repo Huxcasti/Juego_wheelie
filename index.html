@@ -2183,11 +2183,13 @@
     // Tráfico exterior, aproximaciones suaves y algunos carros que
     // avanzan de frente por la línea de chapitas antes de apartarse.
     const carLanes = [-4.60,4.60];
-    const COIN_PICKUP_WIDTH=.76;
-    const COIN_PICKUP_LENGTH=1.6;
-    const COIN_MAX_LANE=2.0;
-    const COIN_CLEARANCE=.24;
-    const TRAFFIC_GAP=42;
+    const COIN_PICKUP_WIDTH=1.12;
+    const COIN_PICKUP_LENGTH=2.5;
+    const COIN_MAX_LANE=1.60;
+    const COIN_CLEARANCE=.62;
+    const TRAFFIC_GAP=66;
+    const TRAFFIC_MIN_SPEED=8;
+    const TRAFFIC_MAX_SPEED=14;
     let trafficPassNumber=0;
     // Dispersión irregular reproducible para que cada intento del mapa
     // conserve las mismas 96 fichas, sin una figura repetida.
@@ -2205,7 +2207,7 @@
         // Pequeños grupos casuales y fichas aisladas, a ambos lados.
         const desired=prev&&random()<.30?
           prev.lane+(random()-.5)*.85:(random()*2-1)*COIN_MAX_LANE;
-        const reach=prev?Math.min(2.2,(at-prev.at)*.15):COIN_MAX_LANE;
+        const reach=prev?Math.min(1.8,(at-prev.at)*.115):COIN_MAX_LANE;
         const lo=prev?Math.max(-COIN_MAX_LANE,prev.lane-reach):-COIN_MAX_LANE;
         const hi=prev?Math.min(COIN_MAX_LANE,prev.lane+reach):COIN_MAX_LANE;
         let lane=Math.max(lo,Math.min(hi,desired));
@@ -2222,7 +2224,7 @@
       }
       // Corrección hacia atrás para que un cono no fuerce un salto imposible.
       for(let i=route.length-2;i>=0;i--){
-        const p=route[i],next=route[i+1],reach=Math.min(2.2,(next.at-p.at)*.15);
+        const p=route[i],next=route[i+1],reach=Math.min(1.8,(next.at-p.at)*.115);
         p.lane=Math.max(next.lane-reach,Math.min(next.lane+reach,p.lane));
       }
       return route;
@@ -2243,7 +2245,7 @@
       const base=rawTrafficLane(car,ahead);
       // Lejos del jugador: los carros pueden circular literalmente por
       // encima de las chapitas. Cerca: reservar la zona de recogida.
-      const protection=trafficSmooth((85-ahead)/40);
+      const protection=trafficSmooth((125-ahead)/55);
       if(protection===0)return base;
       // Lado fijo durante cada pasada: nunca saltar de izquierda a
       // derecha para abrir paso a una moneda.
@@ -2254,7 +2256,7 @@
       // dentro de la ventana longitudinal de recogida, proteger TODA
       // esa ventana, incluido el inicio y el final del cruce.
       const core=length+COIN_PICKUP_LENGTH+.5;
-      const taper=34;
+      const taper=42;
       let magnitude=Math.max(0,side*base);
       for(const coin of coinRoute){
         const dz=Math.abs(coin.at-worldAt);
@@ -2281,8 +2283,9 @@
       car.innerLane=coin?.lane??0;
       // Sortear independientemente el comportamiento de cada automóvil.
       const mode=Math.random();
-      if(eligible&&mode<.80){
-        car.trafficMode=mode<.40?'hold':mode<.60?'cross':'shift';
+      if(eligible&&mode<.40){
+        // La mayoría va por fuera; algunos todavía cambian de carril.
+        car.trafficMode=mode<.15?'hold':mode<.27?'cross':'shift';
         car.nearCoins=true;
         car.directCoins=true;
         if(car.trafficMode==='hold'){
@@ -2294,10 +2297,10 @@
             Math.abs(c.at-(meet+15))<Math.abs(best.at-(meet+15))?c:best,null);
           car.exitLane=next?.lane??-car.innerLane;
         }
-        car.entryStart=145+Math.random()*35;
-        car.entryEnd=88+Math.random()*15;
-        car.secondStart=car.entryEnd-4-Math.random()*5;
-        car.secondEnd=48+Math.random()*12;
+        car.entryStart=205+Math.random()*35;
+        car.entryEnd=155+Math.random()*12;
+        car.secondStart=car.entryEnd-6-Math.random()*5;
+        car.secondEnd=95+Math.random()*12;
       }
       car.protectSide=Math.sign(car.exitLane)||startSide;
       car.lane=trafficLaneAt(car,car.ahead,at+car.ahead);
@@ -2383,19 +2386,19 @@
       // Cambiar el orden real de los 12 vehículos, incluso el autobús y
       // la camioneta. Se conservan los modelos cargados y sus dimensiones.
       const ordered=shuffleTraffic(oncomingCars);
-      let ahead=76+Math.random()*48;
+      let ahead=120+Math.random()*45;
       for(const car of ordered){
         if(loadedPassengerPack&&car.isPackPlaceholder){
           const variant=nextRandomPassengerVariant();
           if(car.variantIndex!==variant)installPassengerVariant(car,variant);
         }
         car.ahead=ahead;
-        car.speed=11+Math.random()*9;
+        car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
         assignTrafficLane(car,trafficPassNumber++,0);
         car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=car.modelReady===true;
         // Distancias distintas sin perder el margen longitudinal mínimo.
-        ahead+=TRAFFIC_GAP+Math.random()*30;
+        ahead+=TRAFFIC_GAP+Math.random()*40;
       }
     }
     function updateOncomingTraffic(dt){
@@ -2412,8 +2415,8 @@
         leadingAhead=car.ahead;
         if(car.ahead < -Math.max(16,car.collisionHalfLength||2)){
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
-          car.ahead=farthest+TRAFFIC_GAP+Math.random()*22;
-          car.speed=11+Math.random()*9;
+          car.ahead=farthest+TRAFFIC_GAP+Math.random()*40;
+          car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
           if(loadedPassengerPack && car.isPackPlaceholder){
             const variant=nextRandomPassengerVariant();
@@ -2442,7 +2445,7 @@
           finish('traffic');return;
         }
       }
-      if(active && nearest<(nearestCar?.directCoins?115:45)){
+      if(active && nearest<(nearestCar?.directCoins?135:75)){
         warnEl.classList.add('visible');
         const inCoinLane=nearestCar?.directCoins;
         const estimatedMeet=nearest*Math.max(0,speed)/
@@ -3393,7 +3396,7 @@
       if(!initialSceneReady)return;
 
       if (active && !paused) {
-        speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
+        speed = Math.max(0, Math.min(22, speed + (keys.gas ? 8 : -5.4) * dt));
         distance = Math.min(LEVEL_LENGTH,distance+speed*dt);
         updateLevelProgress();
         const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
@@ -3404,7 +3407,7 @@
         lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,5,dt);
         const rollingSpeed=speed>.20?speed:0;
         const traction=THREE.MathUtils.clamp(rollingSpeed/5,0,1);
-        const desiredSideSpeed=lateralMotion*(2.1+rollingSpeed*.11)*traction;
+        const desiredSideSpeed=lateralMotion*(2.5+rollingSpeed*.115)*traction;
         steerVelocity=rollingSpeed===0?0:
           THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,8,dt);
         if(rollingSpeed>0){
@@ -3428,10 +3431,10 @@
         gasHeldSeconds = keys.gas ? Math.min(9, gasHeldSeconds + dt) :
           Math.max(0, gasHeldSeconds - dt * 2.1);
         const powered = keys.gas && speed > 3.2;
-        const risingPitch = Math.max(0, speed - 3.2) * .041;
-        const holdPitch = Math.max(0, gasHeldSeconds - 1.1) * .26;
+        const risingPitch = Math.max(0, speed - 3.2) * .036;
+        const holdPitch = Math.max(0, gasHeldSeconds - 1.7) * .17;
         const targetAngle = powered ? Math.min(1.82, .10 + risingPitch + holdPitch) : 0;
-        tilt = THREE.MathUtils.damp(tilt, targetAngle, powered ? 1.9 : 1.5, dt);
+        tilt = THREE.MathUtils.damp(tilt, targetAngle, powered ? 1.65 : 2.35, dt);
         tilt = Math.max(-.035, tilt);
 
         const validWheelie = tilt > 0.16 && tilt < 1.48 && speed > 2;
@@ -3444,7 +3447,8 @@
           multiplierEl.textContent = 'x' + multiplier + ' · ' + (POINTS_PER_SECOND * multiplier) + ' pts/s';
           scorePill.classList.toggle('extreme', multiplier >= 4);
           wasWheelie = true;
-          messageEl.textContent = multiplier === 5 ? '¡WHEELIE EXTREMO! x5' :
+          messageEl.textContent = tilt>1.25 ? '¡SUELTA GAS PARA EQUILIBRAR!' :
+            multiplier === 5 ? '¡WHEELIE EXTREMO! x5' :
             multiplier >= 3 ? '¡SIGUE ASÍ! x' + multiplier : '¡MANTÉN EL EQUILIBRIO!';
         } else if (wasWheelie && tilt < 0.10) {
           // Aterrizar sin volcarse no termina el mapa. Se puede seguir
@@ -3463,7 +3467,7 @@
         } else if (speed < 2) {
           messageEl.textContent = '¡ACELERA PARA LEVANTAR!';
         } else {
-          messageEl.textContent = '¡MANTÉN GAS PARA LEVANTAR!';
+          messageEl.textContent = tilt>1.25?'¡SUELTA GAS PARA EQUILIBRAR!':'¡MANTÉN GAS PARA LEVANTAR!';
         }
         if (!validWheelie) {
           multiplierEl.textContent = 'LEVANTA PARA PUNTUAR';
