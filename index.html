@@ -480,6 +480,75 @@
     // Montaña rocosa original que aportó el usuario. Se muestra como
     // silueta distante y NO forma parte de la carretera ni sus colisiones.
     // La geometría ya viene normalizada: 294 m de ancho x 53 m de alto.
+    // Nubes originales de cloud.glb: cinco formas normalizadas y ligeras.
+    // El cielo tiene su propio desplazamiento suave, sin reciclar las
+    // nubes dentro del campo visible ni mezclarlas con los obstáculos.
+    const cloudSlots=[];
+    const cloudLayout=[
+      [-118,56,196,37],[-66,61,170,31],[-16,72,230,48],
+      [49,53,193,35],[106,69,224,44],[155,83,262,46],
+      [-170,83,260,48],[-96,85,258,32],[-38,42,152,24],
+      [27,88,265,41],[78,47,156,26],[140,50,208,32]
+    ];
+    let cloudClock=0,initialCloudsReady=false;
+    function updateClouds(dt=0){
+      cloudClock+=Math.max(0,dt);
+      for(const cloud of cloudSlots){
+        const p=cloud.userData;
+        // Parallax moderado: las nubes parecen estar mucho más lejos
+        // que el terreno, sin saltos durante todo el mapa de 1200 m.
+        const drift=Math.sin(cloudClock*.025+p.phase)*5;
+        cloud.position.set(p.x+drift+rider.position.x*.12,
+          p.y+Math.sin(cloudClock*.018+p.phase)*.40,
+          rider.position.z-p.depth+distance*.018);
+      }
+    }
+    async function loadClouds(){
+      try{
+        const {CLOUD_B64}=await import('./assets/clouds-mobile.js?v=cloud1');
+        const packed=Uint8Array.from(atob(CLOUD_B64),c=>c.charCodeAt(0));
+        const raw=await new Response(new Blob([packed]).stream()
+          .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>loader.parse(raw,'',resolve,reject));
+        gltf.scene.updateMatrixWorld(true);
+        const templates=[];
+        gltf.scene.traverse(obj=>{
+          if(!obj.isMesh)return;
+          const geo=obj.geometry.clone().applyMatrix4(obj.matrixWorld);
+          geo.computeBoundingBox();
+          const center=geo.boundingBox.getCenter(new THREE.Vector3());
+          geo.translate(-center.x,-center.y,-center.z);
+          geo.computeVertexNormals();
+          geo.computeBoundingSphere();
+          const material=new THREE.MeshStandardMaterial({
+            color:0xf7fbff,roughness:1,metalness:0,fog:false,
+            emissive:0xadc8e0,emissiveIntensity:.22
+          });
+          templates.push({geo,material});
+        });
+        if(templates.length!==5)throw Error('Formas de nubes incompletas');
+        for(let i=0;i<cloudLayout.length;i++){
+          const [x,y,depth,width]=cloudLayout[i];
+          const template=templates[i%templates.length];
+          const cloud=new THREE.Mesh(template.geo,template.material);
+          cloud.name='Nube 3D lejana '+(i+1);
+          cloud.scale.set(width,width*.78,width);
+          cloud.rotation.y=(i%3-1)*.14;
+          cloud.castShadow=false;
+          cloud.receiveShadow=false;
+          cloud.userData={x,y,depth,phase:i*1.73};
+          scene.add(cloud);
+          cloudSlots.push(cloud);
+        }
+        updateClouds();
+        initialCloudsReady=cloudSlots.length===cloudLayout.length;
+        console.info('Nubes originales 3D:',cloudSlots.length);
+      }catch(error){
+        // Decoración opcional: si hay un fallo de red no impedir jugar.
+        console.warn('No se pudieron cargar las nubes:',error);
+      }
+    }
+
     let distantMountain=null;
     const MOUNTAIN_VISUAL_DISTANCE=255;
     // El archivo es un recorte de terreno: sus bordes no bajan al suelo.
@@ -3387,6 +3456,7 @@
         1.23+THREE.MathUtils.clamp(rider.position.y,-.25,3.0)*.23,
         rider.position.z-7.2
       );
+      updateClouds(paused?0:dt);
       renderer.render(scene,camera);
     }
 
@@ -3407,6 +3477,7 @@
         ['Grama nueva',loadMeadowGrass,()=>!!meadowGrass],
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
+        ['Nubes',loadClouds,()=>true],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
         ['Autobús',loadABCOBus,()=>oncomingCars.some(c=>c.isBus&&c.modelReady)],
         ['Camioneta',loadVintage1970Truck,()=>oncomingCars.some(c=>c.isTruck&&c.modelReady)]
@@ -3463,6 +3534,7 @@
       count.textContent='Preparando la primera imagen…';
       try{
         updateRoadWrap();
+        updateClouds();
         camera.position.set(.70,3.50,8.30);
         camera.lookAt(.48,1.23,-7.20);
         camera.updateMatrixWorld(true);
