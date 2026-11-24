@@ -273,6 +273,31 @@
       z-index:15;text-decoration:none}
     #bus3DCredit:focus-visible{outline:2px solid #fff}
     body.playing #bus3DCredit{display:none}
+
+    /* Guía de ATV 3D: imagen aprobada por el jugador, reemplaza el SVG.
+       No desplaza el centro táctil ni modifica el tamaño de GAS. */
+    #controls > .steering-control {
+      border:0;background:transparent;box-shadow:none;
+      overflow:visible;touch-action:none;-webkit-user-select:none;user-select:none;
+      -webkit-tap-highlight-color:transparent;
+    }
+    #steering-wheel{
+      width:100%;height:100%;display:block;border-radius:50%;
+      transition:transform .075s ease-out;
+      transform-origin:50% 50%;will-change:transform;
+    }
+    #steering-art{
+      display:block;width:100%;height:100%;object-fit:contain;
+      pointer-events:none;-webkit-user-drag:none;user-select:none;
+      filter:drop-shadow(0 5px 7px #0009);
+    }
+    #steering:focus-visible{outline:2px solid #ffe052;outline-offset:5px}
+    #steering.steering-active #steering-art{
+      filter:drop-shadow(0 4px 10px #ffd1489f);
+    }
+    @media(prefers-reduced-motion:reduce){
+      #steering-wheel{transition:none}
+    }
 </style>
 </head>
 <body>
@@ -317,17 +342,11 @@
 
   <div id="controls" aria-label="Controles táctiles del juego">
     <div id="steering" class="steering-control" role="slider" tabindex="0"
-         aria-label="Manubrio de dirección" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
-      <div id="steering-wheel">
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <circle cx="60" cy="60" r="48" fill="none" stroke="#81999c" stroke-width="7"/>
-          <circle cx="60" cy="60" r="40" fill="none" stroke="#28464f" stroke-width="4"/>
-          <path d="M14 44 L30 44 Q60 56 90 44 L106 44" fill="none" stroke="#e9ece6" stroke-width="7" stroke-linecap="round"/>
-          <path d="M15 39 L26 39 M94 39 L105 39" fill="none" stroke="#17272a" stroke-width="13" stroke-linecap="round"/>
-          <path d="M60 45 L60 77" stroke="#b5c5c5" stroke-width="8" stroke-linecap="round"/>
-          <circle cx="60" cy="61" r="12" fill="#45b9a5" stroke="#ddece7" stroke-width="3"/>
-          <path d="M32 88 Q60 101 88 88" fill="none" stroke="#81b8a9" stroke-width="4" stroke-linecap="round"/>
-        </svg>
+         aria-label="Guía de FourTrax: izquierda o derecha"
+         aria-orientation="horizontal" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
+      <div id="steering-wheel" aria-hidden="true">
+        <img id="steering-art" src="./assets/atv-steering-control.webp"
+             alt="" draggable="false" decoding="async" fetchpriority="high"/>
       </div>
     </div>
     <button class="btn gas" data-key="gas" type="button" aria-label="Acelerar y hacer wheelie">GAS</button>
@@ -1424,26 +1443,50 @@
     })();
 
 
-    // Guía táctil tipo manubrio: desliza lateralmente; vuelve al centro al soltar.
+    // Nuevo guía ATV: rotación intuitiva y movimiento en la dirección
+    // del dedo (derecha positiva, izquierda negativa). Cada control usa
+    // su pointerId; GAS y dirección admiten dos dedos simultáneos.
     const steeringEl=document.getElementById('steering');
     const steeringWheelEl=document.getElementById('steering-wheel');
     let steerValue=0,keyboardSteer=0,lateralMotion=0;
+    let steeringPointerId=null;
     function setSteer(value){
       steerValue=THREE.MathUtils.clamp(value,-1,1);
-      steeringWheelEl.style.transform='rotate('+(-steerValue*43)+'deg)';
+      // Positivo = imagen se mueve y gira hacia la derecha.
+      steeringWheelEl.style.transform=
+        'translateX('+(steerValue*4).toFixed(1)+'px) rotate('+
+        (steerValue*34).toFixed(1)+'deg)';
       steeringEl.setAttribute('aria-valuenow',String(Math.round(steerValue*100)));
     }
     function steeringAt(clientX){
       const r=steeringEl.getBoundingClientRect();
-      setSteer(((clientX-r.left)/r.width-.5)*2.3);
+      const center=r.left+r.width*.5;
+      const halfRange=r.width*.43;
+      setSteer((clientX-center)/halfRange);
     }
     steeringEl.addEventListener('pointerdown',e=>{
-      e.preventDefault();steeringEl.setPointerCapture(e.pointerId);steeringAt(e.clientX);
+      if(steeringPointerId!==null)return; // No robar otro dedo.
+      if(e.pointerType==='mouse'&&e.button!==0)return;
+      e.preventDefault();
+      steeringPointerId=e.pointerId;
+      try{steeringEl.setPointerCapture(e.pointerId);}catch(err){}
+      steeringEl.classList.add('steering-active');
+      steeringAt(e.clientX);
     });
     steeringEl.addEventListener('pointermove',e=>{
-      if(steeringEl.hasPointerCapture(e.pointerId)){e.preventDefault();steeringAt(e.clientX);}
+      if(e.pointerId!==steeringPointerId)return;
+      e.preventDefault();
+      steeringAt(e.clientX);
     });
-    for(const event of ['pointerup','pointercancel','lostpointercapture'])steeringEl.addEventListener(event,()=>setSteer(0));
+    function finishSteeringTouch(e){
+      if(e.pointerId!==steeringPointerId)return;
+      steeringPointerId=null;
+      steeringEl.classList.remove('steering-active');
+      setSteer(0);
+    }
+    for(const event of ['pointerup','pointercancel','lostpointercapture']){
+      steeringEl.addEventListener(event,finishSteeringTouch);
+    }
     steeringEl.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
     steeringEl.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
     steeringEl.addEventListener('keydown',e=>{
@@ -1453,6 +1496,11 @@
     steeringEl.addEventListener('keyup',e=>{if(e.code==='ArrowLeft'||e.code==='ArrowRight')setSteer(0)});
     addEventListener('keydown',e=>{if(e.code==='KeyA')keyboardSteer=-1;if(e.code==='KeyD')keyboardSteer=1;});
     addEventListener('keyup',e=>{if(e.code==='KeyA'||e.code==='KeyD')keyboardSteer=0;});
+    addEventListener('blur',()=>{
+      steeringPointerId=null;
+      steeringEl.classList.remove('steering-active');
+      setSteer(0);
+    });
 
 
     /* Carros que vienen de frente. Las distancias están relativas al FourTrax,
