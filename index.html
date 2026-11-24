@@ -302,6 +302,22 @@
     #handlebar-labels span:last-child{color:#ffd08a}
     @media(orientation:landscape){#controls > #steering{width:min(90vw,110dvh,650px)}}
     @media(prefers-reduced-motion:reduce){#steering-wheel,#throttle-art{transition:none}}
+    /* Cubierta opaca desde el primer HTML: jamás mostrar modelos de prueba. */
+    #loadingOverlay{position:fixed;inset:0;z-index:10000;background:linear-gradient(155deg,#071323,#163a53);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;
+      color:white;text-align:center;touch-action:none}
+    #loadingOverlay[hidden]{display:none}
+    #loadingBrand{font-size:clamp(34px,8vw,72px);font-weight:1000;font-style:italic;line-height:.98;
+      text-shadow:0 4px 0 #000;letter-spacing:-.04em}
+    #loadingBrand span{color:#ffcf32;display:block}
+    #loadingStatus{font-size:14px;font-weight:800;margin:28px 0 12px;color:#d9efff}
+    #loadingProgress{width:min(78vw,330px);height:10px;border-radius:20px;overflow:hidden;background:#ffffff25}
+    #loadingProgressBar{height:100%;width:0;background:linear-gradient(90deg,#ffb521,#ffef7b);
+      border-radius:20px;transition:width .18s ease-out}
+    #loadingCount{font-size:12px;color:#c3daeb;margin-top:8px}
+    #loadingRetry{margin-top:18px;padding:12px 22px;border-radius:14px;font-size:16px;font-weight:900;
+      border:2px solid #fff6b0;color:#172336;background:#ffdb4c;touch-action:manipulation}
+    #loadingRetry[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -1619,8 +1635,9 @@
     const directionKeys=new Set();
     function setSteer(value){
       steerValue=THREE.MathUtils.clamp(value,-1,1);
-      steeringWheelEl.style.transform='translateX('+(steerValue*3).toFixed(1)+'px) rotate('+(steerValue*13).toFixed(1)+'deg)';
-      steeringEl.setAttribute('aria-valuenow',String(Math.round(steerValue*100)));
+      const visual=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
+      steeringWheelEl.style.transform='translateX('+(visual*3).toFixed(1)+'px) rotate('+(visual*13).toFixed(1)+'deg)';
+      steeringEl.setAttribute('aria-valuenow',String(Math.round(visual*100)));
     }
     function syncThumbs(){
       const values=[...steeringTouches.values()];
