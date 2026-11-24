@@ -329,6 +329,35 @@
     #loadingRetry{margin-top:18px;padding:12px 22px;border-radius:14px;font-size:16px;font-weight:900;
       border:2px solid #fff6b0;color:#172336;background:#ffdb4c;touch-action:manipulation}
     #loadingRetry[hidden]{display:none}
+    /* Indicadores en flujo normal: no pueden solaparse entre sí.
+       La altura real del HUD superior determina dónde comienza el bloque. */
+    #raceStatus{
+      position:fixed;top:var(--race-status-top,88px);
+      left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));
+      display:grid;grid-template-columns:minmax(0,1fr) auto;
+      align-items:start;gap:12px;z-index:30;pointer-events:none
+    }
+    #raceCounters{display:flex;flex-direction:column;align-items:flex-end;gap:10px;min-width:0}
+    #raceStatus #coinBadge,#raceStatus #levelProgress,#raceStatus #roadAlert{
+      position:static;inset:auto;transform:none;max-width:100%;line-height:1.2
+    }
+    #raceStatus #coinBadge{transform-origin:right center;font-variant-numeric:tabular-nums}
+    #raceStatus #levelProgress{font-size:clamp(10px,2.75vw,13px);font-variant-numeric:tabular-nums;padding:6px 10px}
+    #raceStatus #roadAlert{
+      justify-self:start;align-self:center;white-space:normal;overflow-wrap:break-word;
+      text-align:left;font-size:clamp(10px,2.65vw,14px);padding:7px 10px
+    }
+    #raceStatus #roadAlert:not(.visible){visibility:hidden}
+    @media(orientation:landscape) and (min-width:620px){
+      #raceCounters{flex-direction:row;align-items:center;gap:12px}
+      #raceStatus{align-items:center}
+    }
+    @media(max-width:350px){
+      #raceStatus{gap:9px;left:8px;right:8px}
+      #raceCounters{gap:9px}
+      #raceStatus #roadAlert{padding:6px 7px}
+      #raceStatus #levelProgress{padding:6px 7px}
+    }
 </style>
 </head>
 <body>
@@ -347,8 +376,13 @@
   </div>
 
   <div id="gameBrand" aria-label="Wheelie Challenge"><b>WHEELIE</b><strong>CHALLENGE</strong></div>
-  <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
-  <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 1200 m</div>
+  <div id="raceStatus">
+    <div id="roadAlert" role="status" aria-live="off"></div>
+    <div id="raceCounters">
+      <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
+      <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 1200 m</div>
+    </div>
+  </div>
   <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
   <a id="bus3DCredit" href="https://sketchfab.com/3d-models/autobus-abco-852a63f852584448a49d643ae944506e"
      target="_blank" rel="noopener noreferrer" title="Modelo Autobus ABCO (CC BY 4.0)">
@@ -358,7 +392,6 @@
   <div id="pauseMessage"><span>PAUSA</span>
     <button id="pauseRetry" type="button" aria-label="Repetir nivel desde el principio">REPETIR</button>
   </div>
-  <div id="roadAlert" role="status" aria-live="off"></div>
   <div id="message"></div>
   <button id="start" disabled>COMENZAR</button>
   <section id="levelResults" role="dialog" aria-modal="true" aria-labelledby="levelResultTitle">
@@ -1280,6 +1313,21 @@
       (LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING
     )+1;
     const warnEl = document.getElementById('roadAlert');
+    // Safari puede cambiar el tamaño del HUD con la orientación y el
+    // texto de puntuación: medirlo evita depender de coordenadas fijas.
+    const primaryHud=document.getElementById('hud');
+    const raceStatusEl=document.getElementById('raceStatus');
+    function positionRaceStatus(){
+      const bottom=primaryHud.getBoundingClientRect().bottom;
+      raceStatusEl.style.setProperty('--race-status-top',Math.ceil(bottom+14)+'px');
+    }
+    positionRaceStatus();
+    if(typeof ResizeObserver==='function'){
+      const hudObserver=new ResizeObserver(positionRaceStatus);
+      hudObserver.observe(primaryHud);
+    }
+    window.addEventListener('resize',positionRaceStatus);
+    window.visualViewport?.addEventListener('resize',positionRaceStatus);
     // Altura de la superficie bajo las ruedas; cero en asfalto plano.
     let surfaceContactHeight = 0;
     function humpGeo(width, length, height) {
