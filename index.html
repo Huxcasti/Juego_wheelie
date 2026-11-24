@@ -2183,53 +2183,58 @@
     // Tráfico exterior, aproximaciones suaves y algunos carros que
     // avanzan de frente por la línea de chapitas antes de apartarse.
     const carLanes = [-4.60,4.60];
-    const COIN_PICKUP_WIDTH=1.12;
-    const COIN_PICKUP_LENGTH=2.5;
-    const COIN_MAX_LANE=1.60;
+    const COIN_PICKUP_WIDTH=1.40;
+    const COIN_PICKUP_LENGTH=3.2;
+    const COIN_MAX_LANE=1.35;
     const COIN_CLEARANCE=.62;
     const TRAFFIC_GAP=66;
     const TRAFFIC_MIN_SPEED=8;
     const TRAFFIC_MAX_SPEED=14;
     let trafficPassNumber=0;
-    // Dispersión irregular reproducible para que cada intento del mapa
-    // conserve las mismas 96 fichas, sin una figura repetida.
-    function buildCoinRoute(){
-      let state=0x47c0a9;
-      const random=()=>{
-        state=(Math.imul(state,1664525)+1013904223)>>>0;
-        return state/4294967296;
-      };
+    // Nueva distribución en cada intento. Las posiciones son definitivas
+    // durante la partida y el tráfico consulta exactamente la misma ruta.
+    function buildCoinRoute(random=Math.random){
       const route=[];
       for(let i=0;i<LEVEL_TOTAL_COINS;i++){
-        const at=LEVEL_FIRST_COIN+i*LEVEL_COIN_SPACING+
-          (i===0||i===LEVEL_TOTAL_COINS-1?0:(random()-.5)*5);
-        const prev=route[i-1];
-        // Pequeños grupos casuales y fichas aisladas, a ambos lados.
-        const desired=prev&&random()<.30?
-          prev.lane+(random()-.5)*.85:(random()*2-1)*COIN_MAX_LANE;
-        const reach=prev?Math.min(1.8,(at-prev.at)*.115):COIN_MAX_LANE;
-        const lo=prev?Math.max(-COIN_MAX_LANE,prev.lane-reach):-COIN_MAX_LANE;
-        const hi=prev?Math.min(COIN_MAX_LANE,prev.lane+reach):COIN_MAX_LANE;
-        let lane=Math.max(lo,Math.min(hi,desired));
+        const offset=i===0?random()*2:i===LEVEL_TOTAL_COINS-1?
+          -random()*2:(random()-.5)*4;
+        const at=LEVEL_FIRST_COIN+i*LEVEL_COIN_SPACING+offset;
+        let lo=-COIN_MAX_LANE,hi=COIN_MAX_LANE;
         for(const o of obstacles){
           if(o.kind!=='conos')continue;
           const phase=((at+o.baseZ+trackLength*.5)%trackLength+trackLength)%trackLength-trackLength*.5;
-          // Dejar la ficha y su zona de recogida fuera de los conos.
-          if(Math.abs(phase)<9){
-            const side=Math.sign(o.group.position.x);
-            if(lane*side>.15)lane=side*.15;
+          // Más espacio cerca de los conos, incluso con el radio ampliado.
+          if(Math.abs(phase)<10){
+            if(o.group.position.x>0)hi=Math.min(hi,.05);
+            else lo=Math.max(lo,-.05);
           }
         }
-        route.push({at,lane});
+        route.push({at,lo,hi});
       }
-      // Corrección hacia atrás para que un cono no fuerce un salto imposible.
+      // Calcular primero los límites compatibles con la siguiente ficha;
+      // así el azar nunca obliga a hacer un cambio lateral demasiado rápido.
+      const reach=(a,b)=>Math.min(1.35,(b.at-a.at)*.095);
       for(let i=route.length-2;i>=0;i--){
-        const p=route[i],next=route[i+1],reach=Math.min(1.8,(next.at-p.at)*.115);
-        p.lane=Math.max(next.lane-reach,Math.min(next.lane+reach,p.lane));
+        const p=route[i],next=route[i+1],d=reach(p,next);
+        p.lo=Math.max(p.lo,next.lo-d);
+        p.hi=Math.min(p.hi,next.hi+d);
       }
-      return route;
+      for(let i=0;i<route.length;i++){
+        const p=route[i],prev=route[i-1];
+        if(prev){
+          const d=reach(prev,p);
+          p.lo=Math.max(p.lo,prev.lane-d);
+          p.hi=Math.min(p.hi,prev.lane+d);
+        }
+        // Algunas fichas quedan casi alineadas, otras se desplazan
+        // naturalmente a ambos lados, sin obligar a un zigzag continuo.
+        const desired=prev&&random()<.40?
+          prev.lane+(random()-.5)*.65:(random()*2-1)*COIN_MAX_LANE;
+        p.lane=Math.max(p.lo,Math.min(p.hi,desired));
+      }
+      return route.map(({at,lane})=>({at,lane}));
     }
-    const coinRoute=buildCoinRoute();
+    let coinRoute=buildCoinRoute();
     function trafficSmooth(t){
       t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);
     }
@@ -3024,17 +3029,21 @@
       }
     }
     function resetCoins(){
-      // Una partida nueva recupera las chapitas; las que no se cogieron
-      // nunca fueron recicladas ni eliminadas durante la partida anterior.
+      // Crear una ruta aleatoria ANTES de reiniciar el tráfico.
+      // Nunca cambiar de posición una ficha durante una partida.
+      coinRoute=buildCoinRoute();
       for(const batch of coinBatches){
-        for(const mesh of batch.meshes)scene.remove(mesh);
+        for(const mesh of batch.meshes){
+          scene.remove(mesh);
+          mesh.dispose?.();
+        }
       }
       coinBatches.length=0;
       coins.length=0;
       coinCount=0;
       coinCountEl.textContent='0';
       resetCoinSparkles();
-      nextCoinAt=LEVEL_FIRST_COIN;
+      nextCoinAt=coinRoute[0].at;
       ensureCoinsAhead(0);
     }
     function updateCoins(dt){
