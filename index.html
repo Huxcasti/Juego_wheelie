@@ -339,7 +339,6 @@
   <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
   <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 1200 m</div>
   <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
-  <div id="coinPopLayer" aria-hidden="true"></div>
   <a id="bus3DCredit" href="https://sketchfab.com/3d-models/autobus-abco-852a63f852584448a49d643ae944506e"
      target="_blank" rel="noopener noreferrer" title="Modelo Autobus ABCO (CC BY 4.0)">
     Autobús ABCO 3D · BgirlKittyEmo · CC BY 4.0
@@ -1959,34 +1958,40 @@
 
     // Los carros continúan pasando cerca, pero nunca por los carriles
     // interiores reservados para recoger chapitas en este mapa.
-    const carLanes = [-3.75,3.75];
+    const carLanes = [-4.05,4.05];
     const COIN_LANE_X=1.02;
     const COIN_PICKUP_WIDTH=.72;
-    const CLOSE_TRAFFIC_MARGIN=.09;
+    const CLOSE_TRAFFIC_MARGIN=.52;
     let trafficPassNumber=0;
-    // Algunas pasadas de carros pequeños rozan la trayectoria de las
-    // chapitas. Nunca cambiar de carril de golpe ni ocupar la moneda:
-    // su centro sigue siendo seguro y el lado interior permite recogerla.
     function chooseTrafficLane(car,pass,coinSide){
       const side=coinSide===-1?-1:1;
       const outer=carLanes[side===-1?0:1];
       const close=car.isPackPlaceholder && !car.isBus && !car.isTruck &&
         pass%3!==2;
-      if(!close)return {lane:outer,nearCoins:false};
       const clearance=(car.collisionHalfWidth??1.325)+playerHalfWidth;
-      const inner=COIN_LANE_X+clearance+CLOSE_TRAFFIC_MARGIN;
-      return {lane:side*Math.min(Math.abs(outer),inner),
-        nearCoins:inner<Math.abs(outer)-.10};
+      // Acercamiento moderado: nunca invadir el centro de una moneda.
+      const inner=side*Math.min(Math.abs(outer),
+        Math.max(2.95,COIN_LANE_X+clearance+CLOSE_TRAFFIC_MARGIN));
+      return {outer,inner:close?inner:outer,
+        nearCoins:close&&Math.abs(outer-inner)>.1};
+    }
+    // Aproximarse suavemente mientras aún queda distancia y abrir
+    // espacio antes del cruce. A 60 m ya está completamente fuera.
+    function trafficLaneAt(car,ahead){
+      const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+      const amount=smooth((155-ahead)/55)*smooth((ahead-60)/35);
+      return car.outerLane+(car.innerLane-car.outerLane)*amount;
     }
     function assignTrafficLane(car,pass,at){
-      // Anticipar el lado de las chapitas donde probablemente se crucen.
-      // La velocidad del jugador puede cambiar; ambos lados siguen siendo seguros.
       const meet=at+Math.max(0,car.ahead)*18/(18+car.speed);
       const coinIndex=Math.max(0,Math.round((meet-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING));
       const side=Math.floor(coinIndex/6)%2===0?-1:1;
       const placement=chooseTrafficLane(car,pass,side);
-      car.lane=placement.lane;
+      car.outerLane=placement.outer;
+      car.innerLane=placement.inner;
       car.nearCoins=placement.nearCoins;
+      car.lane=trafficLaneAt(car,car.ahead);
+      car.group.rotation.y=0;
     }
     // "Autobus ABCO" por BgirlKittyEmo, CC BY 4.0 (Sketchfab).
     // Modelo GLB original aportado por el usuario; versión optimizada
@@ -2091,7 +2096,13 @@
           // El nuevo modelo puede tener otro ancho: calcular después del cambio.
           assignTrafficLane(car,trafficPassNumber++,distance);
         }
+        const previousLane=car.lane;
+        car.lane=trafficLaneAt(car,car.ahead);
         car.group.position.set(car.lane,0,rider.position.z-car.ahead);
+        // Pequeño giro visual coherente con el desplazamiento lateral.
+        const heading=Math.atan2(car.lane-previousLane,Math.max(.001,car.speed*dt));
+        car.group.rotation.y=THREE.MathUtils.damp(car.group.rotation.y,
+          THREE.MathUtils.clamp(heading,-.12,.12),7,dt);
         for(const tire of car.rolling)
           tire.rotation.x+=car.speed*dt/(car.wheelRadius||.30);
         if(car.ahead>0&&car.ahead<nearest){nearest=car.ahead;nearestCar=car;}
@@ -2105,7 +2116,7 @@
           finish('traffic');return;
         }
       }
-      if(active && nearest<27){
+      if(active && nearest<45){
         warnEl.classList.add('visible');
         warnEl.textContent='🚗 TRÁFICO DE FRENTE · '+Math.ceil(nearest)+' m';
         if(nearest<15 && tilt<1.4)messageEl.textContent=nearestCar?.nearCoins?
@@ -2291,7 +2302,8 @@
           ((car.collisionHalfLength||1.5)+playerHalfLength))/relativeSpeed;
         if(encounter>4.3)continue;
         const predicted=atTime(encounter);
-        const clearance=Math.abs(predicted-car.lane);
+        const futureLane=trafficLaneAt(car,car.ahead-encounter*relativeSpeed);
+        const clearance=Math.abs(predicted-futureLane);
         const safeWidth=(car.collisionHalfWidth ??
           (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth+.12;
         // Penalización alta por colisión prevista en el momento del cruce.
@@ -2526,7 +2538,6 @@
       sparkleColors.fill(0);
       sparkleGeometry.attributes.position.needsUpdate=true;
       sparkleGeometry.attributes.color.needsUpdate=true;
-      document.getElementById('coinPopLayer').replaceChildren();
     }
     function spawnCoinSparkles(coin){
       for(let k=0;k<14;k++){
@@ -2573,23 +2584,6 @@
         sparkleGeometry.attributes.position.needsUpdate=true;
         sparkleGeometry.attributes.color.needsUpdate=true;
       }
-    }
-    const coinPopupLayer=document.getElementById('coinPopLayer');
-    const coinProjection=new THREE.Vector3();
-    function showCoinPoints(coin){
-      if(coinPopupLayer.childElementCount>=8){
-        coinPopupLayer.firstElementChild?.remove();
-      }
-      camera.updateMatrixWorld();
-      coinProjection.set(coin.lane,1.45,-coin.at).project(camera);
-      if(!Number.isFinite(coinProjection.x) || coinProjection.z>1)return;
-      const popup=document.createElement('div');
-      popup.className='coin-points-popup';
-      popup.textContent='+'+COIN_POINTS+' PTS';
-      popup.style.left=Math.max(9,Math.min(91,(coinProjection.x+1)*50))+'%';
-      popup.style.top=Math.max(20,Math.min(79,(1-coinProjection.y)*50))+'%';
-      coinPopupLayer.appendChild(popup);
-      popup.addEventListener('animationend',()=>popup.remove(),{once:true});
     }
     // Sin archivos adicionales: una campanita breve sintetizada. El
     // AudioContext se habilita únicamente con una pulsación del jugador.
@@ -2738,7 +2732,7 @@
           scoreEl.textContent=formatScore(score);
           // Recompensa instantánea, con animación 3D visual por .34 s.
           spawnCoinSparkles(coin);
-          showCoinPoints(coin);
+          // Sin texto flotante: se conserva el efecto 3D y el sonido.
           playCoinChime();
           setCoinTransform(coin,rivalClock*2.6,0,0);
           const badge=document.getElementById('coinBadge');
