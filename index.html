@@ -1339,6 +1339,67 @@
       console.info('Grama de relleno:',grassFillPlants.length,'matas');
     }
 
+    // Brisa en todas las variedades de grama instanciada. Las raíces
+    // permanecen fijas; solo se flexionan los tallos y las puntas.
+    function enableGrassWind(mesh){
+      if(!mesh||mesh.userData.grassWind)return;
+      const geometry=mesh.geometry;
+      geometry.computeBoundingBox();
+      const minY=geometry.boundingBox.min.y;
+      const height=Math.max(.001,geometry.boundingBox.max.y-minY);
+      const material=mesh.material;
+      // La grama de relleno comparte material y geometría con la pradera.
+      // Instalar el shader una sola vez por material.
+      if(!material.userData.grassWind){
+        material.userData.grassWind=true;
+        const windBounds={value:new THREE.Vector2(minY,1/height)};
+        material.onBeforeCompile=shader=>{
+          shader.uniforms.uGrassTime=treeWindTime;
+          shader.uniforms.uGrassBounds=windBounds;
+          shader.vertexShader=shader.vertexShader.replace('#include <common>',
+            '#include <common>\nuniform float uGrassTime;\nuniform vec2 uGrassBounds;');
+          shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`
+            #include <begin_vertex>
+            #ifdef USE_INSTANCING
+              mat4 grassMatrix=modelMatrix*instanceMatrix;
+              vec3 grassRoot=grassMatrix[3].xyz;
+              float grassHeight=clamp((position.y-uGrassBounds.x)*uGrassBounds.y,0.0,1.0);
+              float bend=grassHeight*grassHeight;
+              float grassDistance=length(grassRoot.xz-cameraPosition.xz);
+              float detail=1.0-smoothstep(40.0,105.0,grassDistance);
+              if(detail>0.005&&bend>0.0001){
+                // Ondas espaciales periódicas para que al reciclar la
+                // carretera de 310 m no cambie de golpe la fase.
+                float phase=grassRoot.x*0.43+grassRoot.z*0.12161004;
+                float gust=0.68+0.32*sin(uGrassTime*0.73+phase*0.5);
+                float sway=sin(uGrassTime*2.05+phase)*0.66+
+                  sin(uGrassTime*3.37+grassRoot.x*0.91+grassRoot.z*0.2026834)*0.34;
+                float scaleY=length(grassMatrix[1].xyz);
+                float amplitude=min(0.19,0.21*scaleY/max(uGrassBounds.y,0.001));
+                float shift=bend*gust*detail*amplitude*sway;
+                vec3 breeze=vec3(shift, -abs(shift)*0.10, shift*0.46);
+                vec3 ax=grassMatrix[0].xyz;
+                vec3 ay=grassMatrix[1].xyz;
+                vec3 az=grassMatrix[2].xyz;
+                transformed+=vec3(dot(breeze,ax)/max(dot(ax,ax),0.0001),
+                  dot(breeze,ay)/max(dot(ay,ay),0.0001),
+                  dot(breeze,az)/max(dot(az,az),0.0001));
+              }
+            #endif
+          `);
+        };
+        material.customProgramCacheKey=()=> 'grass-wind-instanced-v1';
+        material.needsUpdate=true;
+      }
+      mesh.userData.grassWind=true;
+    }
+    function installGrassWind(){
+      for(const mesh of [roadsideGrass,meadowGrass,grassFillMesh,
+        ...extraGrassBatches.map(batch=>batch.mesh)]){
+        enableGrassWind(mesh);
+      }
+    }
+
     // Casas 3D aportadas por el usuario: original, abandonada y dúplex.
     // Se prepararon archivos móviles a partir de cada GLB, eliminando
     // geometría de herrería excesivamente densa en la casa normal.
@@ -4052,6 +4113,7 @@
         installPlatanusTrees();
         enhanceAllTrees();
         installGrassFill();
+        installGrassWind();
         updateRoadWrap();
         updateClouds();
         camera.position.set(.70,3.50,8.30);
