@@ -2789,13 +2789,29 @@
         distance = Math.min(LEVEL_LENGTH,distance+speed*dt);
         updateLevelProgress();
         const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
+        // El manubrio puede girar parado, pero NO arrastra el FourTrax.
+        // La dirección necesita velocidad hacia delante para desplazar
+        // el vehículo: transición gradual a baja velocidad y cero real
+        // al detenerse (también cancela inercia lateral residual).
         lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,5,dt);
-        // Velocidad lateral amortiguada para una respuesta progresiva.
-        const desiredSideSpeed=lateralMotion*(2.1+speed*.11);
-        steerVelocity=THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,8,dt);
-        rider.position.x=THREE.MathUtils.clamp(rider.position.x+steerVelocity*dt,-4.6,4.6);
-        rider.rotation.y=THREE.MathUtils.damp(rider.rotation.y,-lateralMotion*.115,6,dt);
-        rider.rotation.z=THREE.MathUtils.damp(rider.rotation.z,-lateralMotion*.06,6,dt);
+        const rollingSpeed=speed>.20?speed:0;
+        const traction=THREE.MathUtils.clamp(rollingSpeed/5,0,1);
+        const desiredSideSpeed=lateralMotion*(2.1+rollingSpeed*.11)*traction;
+        steerVelocity=rollingSpeed===0?0:
+          THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,8,dt);
+        if(rollingSpeed>0){
+          rider.position.x=THREE.MathUtils.clamp(
+            rider.position.x+steerVelocity*dt,-4.6,4.6
+          );
+        }
+        // El cuerpo solo gira y se inclina mientras avanza; las ruedas
+        // delanteras sí pueden mostrar dirección aun estando detenido.
+        rider.rotation.y=THREE.MathUtils.damp(
+          rider.rotation.y,-lateralMotion*.115*traction,6,dt
+        );
+        rider.rotation.z=THREE.MathUtils.damp(
+          rider.rotation.z,-lateralMotion*.06*traction,6,dt
+        );
 
         // Un solo GAS: acelerar aumenta progresivamente el ángulo.
         // Si se mantiene presionado, el centro de masa se va hacia atrás:
