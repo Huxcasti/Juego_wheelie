@@ -438,12 +438,16 @@
       scene.add(group);
       landscape.push(group);
     }
-    // Copias reales del árbol: conservan hojas, ramas y corteza.
-    // 42 en lugar de 88 para mantener los FPS en Safari móvil.
-    for(let i=0;i<21;i++)for(const side of [-1,1]){
-      const group=new THREE.Group(),z=-158+i*14.8+side*1.5;
-      group.position.x=side*(10.3+(i%3)*1.15);
+    // Paisaje más frondoso: 32 árboles por lado, alternando Citrus
+    // y jacarandas, sin que las copas invadan la carretera.
+    // Las posiciones se reciclan en el bucle de 310 m, para todo
+    // el Mapa 1 de 1,200 m sin multiplicar la cantidad de modelos.
+    for(let i=0;i<32;i++)for(const side of [-1,1]){
+      const group=new THREE.Group(),z=-155+i*9.5+side*1.4;
+      group.position.x=side*(10.9+(i%4)*1.03);
       group.userData.treeIndex=i*2+(side===1?1:0);
+      group.userData.treeRow=i;
+      group.userData.treeSide=side;
       registerScenery(group,z);
       treeSlots.push(group);
     }
@@ -483,8 +487,8 @@
           tree.scale.setScalar(.88+(i%6)*.055);
           slot.add(tree);
         }
-        // Jacarandas aportados por el usuario: sustituir aproximadamente
-        // uno de cada cuatro Citrus, sin superponer ambos en el mismo sitio.
+        // Jacarandas aportados por el usuario: uno de cada tres
+        // puestos en CADA lado, sin superponerlos con Citrus.
         // Ambos modelos comparten geometría/texturas entre sus copias.
         // Si no carga el jacaranda se conservan TODOS los árboles Citrus.
         let jacarandasAdded=0;
@@ -514,10 +518,12 @@
             }
           });
           if(jacarandaMeshes<5)throw new Error('Jacaranda 3D incompleto');
-          // Elegir la misma proporción a ambos lados de la carretera.
+          // Usar la FILA en lugar del índice intercalado izquierda/
+          // derecha. Antes i%4===1 escogía solo el lado derecho.
+          // Con 32 filas por lado tenemos 11 jacarandas a cada lado.
           for(const slot of treeSlots){
             const i=slot.userData.treeIndex;
-            if(i%4!==1)continue;
+            if(slot.userData.treeRow%3!==1)continue;
             const jacaranda=jacarandaModel.clone(true);
             jacaranda.name='Jacaranda 3D';
             jacaranda.position.y=.018;
@@ -552,6 +558,80 @@
         }
       }
     }
+
+    // Grama 3D del archivo del usuario, normalizada y con textura real.
+    // Un único InstancedMesh para todos los macollos: unas 7 mil caras
+    // en total y una sola llamada de dibujo, apto para iPhone.
+    let roadsideGrass=null;
+    const grassClumps=[];
+    const grassTransform=new THREE.Object3D();
+    for(const side of [-1,1])for(let strip=0;strip<4;strip++){
+      for(let i=0;i<44;i++){
+        const seed=i*23+strip*41+(side===1?17:0);
+        grassClumps.push({
+          x:side*(8.1+strip*1.67+(seed%3)*.10),
+          baseZ:-154+i*7.0+strip*1.55+side*.95,
+          yaw:(seed*.73)%(Math.PI*2),
+          scale:.54+(seed%9)*.065
+        });
+      }
+    }
+    function updateRoadsideGrass(){
+      if(!roadsideGrass)return;
+      for(let i=0;i<grassClumps.length;i++){
+        const plant=grassClumps[i];
+        const relative=(((plant.baseZ+distance+155)%310)+310)%310-155;
+        grassTransform.position.set(
+          plant.x,.022,rider.position.z+relative
+        );
+        grassTransform.rotation.set(0,plant.yaw,0);
+        grassTransform.scale.setScalar(plant.scale);
+        grassTransform.updateMatrix();
+        roadsideGrass.setMatrixAt(i,grassTransform.matrix);
+      }
+      roadsideGrass.instanceMatrix.needsUpdate=true;
+    }
+    async function loadRoadsideGrass(){
+      try{
+        if(typeof DecompressionStream!=='function')
+          throw new Error('La grama necesita gzip');
+        const {GRASS_ASSET_B64}=await import('./assets/grass-mobile.js?v=grass1');
+        const packed=Uint8Array.from(atob(GRASS_ASSET_B64),
+          ch=>ch.charCodeAt(0));
+        const raw=await new Response(
+          new Blob([packed]).stream()
+            .pipeThrough(new DecompressionStream('gzip'))
+        ).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>
+          loader.parse(raw,'',resolve,reject));
+        let sourceMesh=null;
+        gltf.scene.traverse(obj=>{
+          if(obj.isMesh && !sourceMesh)sourceMesh=obj;
+        });
+        if(!sourceMesh || !sourceMesh.geometry?.getAttribute('uv'))
+          throw new Error('Archivo de grama sin malla o UV');
+        const material=sourceMesh.material.clone();
+        material.side=THREE.DoubleSide;
+        material.alphaTest=.38;
+        material.transparent=false;
+        material.depthWrite=true;
+        material.needsUpdate=true;
+        roadsideGrass=new THREE.InstancedMesh(
+          sourceMesh.geometry,material,grassClumps.length
+        );
+        roadsideGrass.name='Grama low-poly real a ambos lados';
+        roadsideGrass.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        roadsideGrass.frustumCulled=false;
+        roadsideGrass.castShadow=false;
+        roadsideGrass.receiveShadow=false;
+        scene.add(roadsideGrass);
+        updateRoadsideGrass();
+        console.info('Grama low-poly cargada:',grassClumps.length,'matas');
+      }catch(error){
+        console.warn('Grama 3D no disponible. El juego continúa.',error);
+      }
+    }
+
     for(let i=0;i<24;i++)for(const side of [-1,1]){
       const group=new THREE.Group(),z=-148+i*13;
       group.position.x=side*7.55;
@@ -1073,6 +1153,7 @@
     let initialVehicleReady=false;
     let pendingStart=false;
     loadCitrusTrees();
+    loadRoadsideGrass();
     loadCustomRider();
 
     function normalizeImportedModel(model) {
@@ -2628,6 +2709,8 @@
       for (const group of landscape) {
         group.position.z = rider.position.z + ((((group.userData.baseZ + distance + 155) % 310) + 310) % 310 - 155);
       }
+      // El follaje bajo se reutiliza frente a la cámara continuamente.
+      updateRoadsideGrass();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
