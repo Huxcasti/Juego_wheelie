@@ -764,6 +764,107 @@
       }
     }
 
+    // Platanus acerifolia: geometría simplificada del GLB original,
+    // con sus texturas de corteza y hojas, compartidas entre las copias.
+    let platanusTemplate=null;
+    async function loadPlatanusTrees(){
+      try{
+        const {PLATANUS_META:m,PLATANUS_B64}=await import('./assets/platanus-tree-mobile.js?v=1');
+        const packed=Uint8Array.from(atob(PLATANUS_B64),c=>c.charCodeAt(0));
+        const raw=await new Response(new Blob([packed]).stream()
+          .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        if(raw.byteLength!==m.sizes.reduce((a,b)=>a+b,0))
+          throw Error('Datos incompletos del árbol');
+        let offset=0;
+        function part(size){
+          const start=offset;offset+=size;return raw.slice(start,offset);
+        }
+        function floats(size,scale){
+          const values=new Int16Array(part(size));
+          return Float32Array.from(values,v=>v/scale);
+        }
+        const woodPos=floats(m.sizes[0],100),woodUV=floats(m.sizes[1],4096);
+        const woodIndex=new Uint32Array(part(m.sizes[2]));
+        const leafPos=floats(m.sizes[3],100),leafUV=floats(m.sizes[4],4096);
+        if(woodPos.length!==m.woodVertices*3||woodIndex.length!==m.woodFaces*3||
+          leafPos.length!==m.leafVertices*3)throw Error('Geometría incompleta');
+        async function texture(bytes,type){
+          const url=URL.createObjectURL(new Blob([bytes],{type}));
+          try{
+            const tex=await new THREE.TextureLoader().loadAsync(url);
+            tex.colorSpace=THREE.SRGBColorSpace;
+            tex.flipY=false;
+            tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+            tex.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+            tex.needsUpdate=true;
+            return tex;
+          }finally{URL.revokeObjectURL(url);}
+        }
+        const bark=part(m.sizes[5]),foliage=part(m.sizes[6]);
+        const [barkMap,leafMap]=await Promise.all([
+          texture(bark,'image/jpeg'),texture(foliage,'image/png')]);
+        function mesh(pos,uv,index,map,name,color){
+          const geometry=new THREE.BufferGeometry();
+          geometry.setAttribute('position',new THREE.BufferAttribute(pos,3));
+          geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+          if(index)geometry.setIndex(new THREE.BufferAttribute(index,1));
+          geometry.computeVertexNormals();
+          geometry.computeBoundingBox();geometry.computeBoundingSphere();
+          const material=new THREE.MeshStandardMaterial({map,color,roughness:.93,
+            metalness:0,side:THREE.DoubleSide});
+          const result=new THREE.Mesh(geometry,material);
+          result.name=name;result.castShadow=false;result.receiveShadow=false;
+          return result;
+        }
+        const group=new THREE.Group();
+        group.add(mesh(woodPos,woodUV,woodIndex,barkMap,'Tronco y ramas',0xffffff));
+        group.add(mesh(leafPos,leafUV,null,leafMap,'Hojas',0xd9e5c9));
+        const bounds=new THREE.Box3().setFromObject(group);
+        const size=bounds.getSize(new THREE.Vector3());
+        if(!Number.isFinite(size.y)||size.y<1)throw Error('Altura incorrecta');
+        group.children.forEach(mesh=>{
+          mesh.geometry.translate(0,-bounds.min.y,0);
+          mesh.geometry.computeBoundingBox();mesh.geometry.computeBoundingSphere();
+        });
+        platanusTemplate=group;
+      }catch(error){console.warn('Platanus no disponible; se conservan los demás árboles',error);}
+    }
+    function installPlatanusTrees(){
+      if(!platanusTemplate)return;
+      const houses=houseSlots.map(slot=>{
+        slot.updateWorldMatrix(true,true);
+        const b=new THREE.Box3().setFromObject(slot);
+        return {minX:b.min.x,maxX:b.max.x,z:(b.min.z+b.max.z)*.5,
+          halfZ:(b.max.z-b.min.z)*.5};
+      });
+      const wrap=z=>((z+155)%310+310)%310-155;
+      const used=[];
+      for(const side of [-1,1]){
+        let count=0;
+        for(let i=0;i<32&&count<6;i++){
+          const seed=i*31+(side===1?13:7);
+          const z=wrap(-148+i*9.5+side*2.7);
+          const x=side*(16.7+(seed%4)*.95);
+          const scale=.76+(seed%7)*.055;
+          const radius=3.0*scale;
+          if(houses.some(h=>x+radius>h.minX&&x-radius<h.maxX&&
+            Math.abs(wrap(z-h.z))<h.halfZ+radius))continue;
+          if(used.some(p=>Math.hypot(x-p.x,wrap(z-p.z))<15))continue;
+          const slot=new THREE.Group();
+          slot.name='Platanus acerifolia';
+          slot.position.x=x;
+          const tree=platanusTemplate.clone(true);
+          tree.position.y=ground.position.y+.018;
+          tree.rotation.y=seed*.61803398875;
+          tree.scale.setScalar(scale);
+          slot.add(tree);
+          registerScenery(slot,z);
+          used.push({x,z});count++;
+        }
+      }
+      console.info('Platanus añadidos:',used.length);
+    }
+
     // Grama 3D del archivo del usuario, normalizada y con textura real.
     // Un único InstancedMesh para todos los macollos: unas 7 mil caras
     // en total y una sola llamada de dibujo, apto para iPhone.
@@ -3645,6 +3746,7 @@
         ['Yamaha Raptor',loadInitialYamaha,()=>initialVehicleReady],
         ['Conductores 3D',loadCustomRider,()=>!!customRider],
         ['Árboles',loadCitrusTrees,()=>initialTreesReady],
+        ['Platanus',loadPlatanusTrees,()=>true],
         ['Grama',loadRoadsideGrass,()=>!!roadsideGrass],
         ['Grama adicional',loadExtraGrass,()=>extraGrassReady],
         ['Grama nueva',loadMeadowGrass,()=>!!meadowGrass],
@@ -3706,6 +3808,7 @@
       status.textContent='Escenario listo';
       count.textContent='Preparando la primera imagen…';
       try{
+        installPlatanusTrees();
         installGrassFill();
         updateRoadWrap();
         updateClouds();
