@@ -979,6 +979,94 @@
       console.info('Grama adicional original:',meadowPlants.length,'matas');
     }
 
+    // Relleno de zonas descubiertas: reutilizar el GLB de grama más ligero.
+    // No descargar modelos nuevos ni duplicar texturas/materiales.
+    const grassFillPlants=[];
+    let grassFillMesh=null,grassFillBucket=NaN;
+    const wrapGrassZ=z=>((z+155)%310+310)%310-155;
+    function makeGrassFillLayout(existing,houseBounds){
+      const result=[];
+      // Rejilla espacial periódica para no duplicar matas ya instaladas.
+      const cells=new Map(),cellSize=2;
+      function insert(p){
+        for(const dz of [-310,0,310]){
+          const key=Math.floor(p.x/cellSize)+','+Math.floor((p.baseZ+dz)/cellSize);
+          if(!cells.has(key))cells.set(key,[]);
+          cells.get(key).push({x:p.x,z:p.baseZ+dz});
+        }
+      }
+      for(const p of existing)insert({...p,baseZ:wrapGrassZ(p.baseZ)});
+      const rows=[7.95,9.65,11.5,13.35,15.6,18.1,20.8,23.6,26.5,29.5,32.5];
+      for(const side of [-1,1])for(let row=0;row<rows.length;row++){
+        const count=row<5?94:72;
+        for(let i=0;i<count;i++){
+          const seed=(i+1)*37+(row+1)*79+(side===1?311:0);
+          const x=side*(rows[row]+Math.sin(seed*1.71)*(row===0?.13:.47));
+          const z=wrapGrassZ(-155+(i+.5)*310/count+
+            row*.89+side*.55+Math.sin(seed*.93)*.72);
+          const scale=row===0?1.05+(seed%7)*.045:
+            row<5?1.14+(seed%9)*.075:1.45+(seed%9)*.085;
+          // Mantener el modelo completo fuera del asfalto y los edificios.
+          const radius=scale*.96;
+          if(Math.abs(x)-radius<6.12)continue;
+          if(houseBounds.some(h=>x+radius>h.minX-.25&&x-radius<h.maxX+.25&&
+            Math.abs(wrapGrassZ(z-h.z))<h.halfZ+radius+.25))continue;
+          const cx=Math.floor(x/cellSize),cz=Math.floor(z/cellSize);
+          let occupied=false;
+          const gap=row<5?.88:1.65;
+          for(let dx=-1;dx<=1&&!occupied;dx++)for(let dz=-1;dz<=1&&!occupied;dz++){
+            for(const p of cells.get((cx+dx)+','+(cz+dz))||[]){
+              if(Math.hypot(p.x-x,p.z-z)<gap){occupied=true;break;}
+            }
+          }
+          if(occupied)continue;
+          const plant={x,baseZ:z,yaw:seed*2.39996323%(Math.PI*2),scale};
+          result.push(plant);insert(plant);
+        }
+      }
+      return result;
+    }
+    function updateGrassFill(force=false){
+      if(!grassFillMesh)return;
+      const bucket=Math.floor(distance/2);
+      if(!force&&bucket===grassFillBucket)return;
+      grassFillBucket=bucket;
+      for(let i=0;i<grassFillPlants.length;i++){
+        const p=grassFillPlants[i];
+        grassTransform.position.set(p.x,ground.position.y+.012,
+          rider.position.z+wrapGrassZ(p.baseZ+distance));
+        grassTransform.rotation.set(0,p.yaw,0);
+        grassTransform.scale.setScalar(p.scale);
+        grassTransform.updateMatrix();
+        grassFillMesh.setMatrixAt(i,grassTransform.matrix);
+      }
+      grassFillMesh.instanceMatrix.needsUpdate=true;
+    }
+    function installGrassFill(){
+      if(!meadowGrass||grassFillMesh)return;
+      // Los límites reales de cada casa ya se conocen al completar la carga.
+      const houseBounds=houseSlots.map(slot=>{
+        slot.updateWorldMatrix(true,true);
+        const bounds=new THREE.Box3().setFromObject(slot);
+        return {minX:bounds.min.x,maxX:bounds.max.x,
+          z:wrapGrassZ((bounds.min.z+bounds.max.z)*.5),
+          halfZ:(bounds.max.z-bounds.min.z)*.5};
+      }).filter(h=>Object.values(h).every(Number.isFinite));
+      const existing=[...grassClumps,...meadowPlants,
+        ...extraGrassBatches.flatMap(batch=>batch.plants)];
+      grassFillPlants.push(...makeGrassFillLayout(existing,houseBounds));
+      grassFillMesh=new THREE.InstancedMesh(
+        meadowGrass.geometry,meadowGrass.material,grassFillPlants.length);
+      grassFillMesh.name='Relleno de grama en zonas descubiertas';
+      grassFillMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      grassFillMesh.frustumCulled=false;
+      grassFillMesh.castShadow=false;
+      grassFillMesh.receiveShadow=false;
+      scene.add(grassFillMesh);
+      updateGrassFill(true);
+      console.info('Grama de relleno:',grassFillPlants.length,'matas');
+    }
+
     // Casas 3D aportadas por el usuario: original, abandonada y dúplex.
     // Se prepararon archivos móviles a partir de cada GLB, eliminando
     // geometría de herrería excesivamente densa en la casa normal.
@@ -3329,6 +3417,7 @@
       updateRoadsideGrass();
       updateExtraGrass();
       updateMeadowGrass();
+      updateGrassFill();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
@@ -3617,6 +3706,7 @@
       status.textContent='Escenario listo';
       count.textContent='Preparando la primera imagen…';
       try{
+        installGrassFill();
         updateRoadWrap();
         updateClouds();
         camera.position.set(.70,3.50,8.30);
