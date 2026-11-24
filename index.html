@@ -298,9 +298,32 @@
     @media(prefers-reduced-motion:reduce){
       #steering-wheel{transition:none}
     }
+    /* Cubierta opaca desde el primer HTML: jamás mostrar modelos de prueba. */
+    #loadingOverlay{position:fixed;inset:0;z-index:10000;background:linear-gradient(155deg,#071323,#163a53);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;
+      color:white;text-align:center;touch-action:none}
+    #loadingOverlay[hidden]{display:none}
+    #loadingBrand{font-size:clamp(34px,8vw,72px);font-weight:1000;font-style:italic;line-height:.98;
+      text-shadow:0 4px 0 #000;letter-spacing:-.04em}
+    #loadingBrand span{color:#ffcf32;display:block}
+    #loadingStatus{font-size:14px;font-weight:800;margin:28px 0 12px;color:#d9efff}
+    #loadingProgress{width:min(78vw,330px);height:10px;border-radius:20px;overflow:hidden;background:#ffffff25}
+    #loadingProgressBar{height:100%;width:0;background:linear-gradient(90deg,#ffb521,#ffef7b);
+      border-radius:20px;transition:width .18s ease-out}
+    #loadingCount{font-size:12px;color:#c3daeb;margin-top:8px}
+    #loadingRetry{margin-top:18px;padding:12px 22px;border-radius:14px;font-size:16px;font-weight:900;
+      border:2px solid #fff6b0;color:#172336;background:#ffdb4c;touch-action:manipulation}
+    #loadingRetry[hidden]{display:none}
 </style>
 </head>
 <body>
+  <div id="loadingOverlay" role="status" aria-live="polite">
+    <div id="loadingBrand">WHEELIE <span>CHALLENGE</span></div>
+    <div id="loadingStatus">Cargando escenario 3D…</div>
+    <div id="loadingProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="loadingProgressBar"></div></div>
+    <div id="loadingCount">Preparando recursos</div>
+    <button id="loadingRetry" type="button" hidden onclick="location.reload()">REINTENTAR CARGA</button>
+  </div>
   <div id="hud">
     <div class="pill"><small>WHEELIE ACTUAL</small><span id="time">0.00 s</span></div>
     <div class="pill"><small>RÉCORD PERSONAL</small><span id="best">0.00 s</span></div>
@@ -321,7 +344,7 @@
   <div id="pauseMessage">PAUSA</div>
   <div id="roadAlert" role="status" aria-live="off"></div>
   <div id="message"></div>
-  <button id="start">COMENZAR</button>
+  <button id="start" disabled>COMENZAR</button>
   <section id="levelResults" role="dialog" aria-modal="true" aria-labelledby="levelResultTitle">
     <div id="levelResultCard">
       <h2 id="levelResultTitle">¡MAPA 1 COMPLETADO!</h2>
@@ -453,7 +476,44 @@
     // silueta distante y NO forma parte de la carretera ni sus colisiones.
     // La geometría ya viene normalizada: 294 m de ancho x 53 m de alto.
     let distantMountain=null;
-    const MOUNTAIN_VISUAL_DISTANCE=222;
+    const MOUNTAIN_VISUAL_DISTANCE=255;
+    // El archivo es un recorte de terreno: sus bordes no bajan al suelo.
+    // Crear laderas de transición en los vértices originales conservando UV.
+    function groundMountainEdges(model){
+      model.updateMatrixWorld(true);
+      const bounds=new THREE.Box3().setFromObject(model);
+      const size=bounds.getSize(new THREE.Vector3());
+      const center=bounds.getCenter(new THREE.Vector3());
+      const base=ground.position.y-.26;
+      if(!Number.isFinite(size.y)||size.y<=0||size.z<=0||size.x<=0)
+        throw new Error('Dimensiones de montaña incorrectas');
+      const point=new THREE.Vector3(),inverse=new THREE.Matrix4();
+      model.traverse(mesh=>{
+        if(!mesh.isMesh)return;
+        mesh.geometry=mesh.geometry.clone();
+        const p=mesh.geometry.getAttribute('position');
+        if(!p)return;
+        inverse.copy(mesh.matrixWorld).invert();
+        for(let i=0;i<p.count;i++){
+          point.fromBufferAttribute(p,i).applyMatrix4(mesh.matrixWorld);
+          const front=THREE.MathUtils.smoothstep(bounds.max.z-point.z,0,size.z*.48);
+          const back=THREE.MathUtils.smoothstep(point.z-bounds.min.z,0,size.z*.22);
+          const side=THREE.MathUtils.smoothstep(
+            Math.min(point.x-bounds.min.x,bounds.max.x-point.x),0,size.x*.075);
+          const elevation=Math.max(0,point.y-bounds.min.y)*.84;
+          point.y=base+elevation*front*back*side;
+          // Extender la falda en profundidad en vez de dejar una pared vertical.
+          point.z=center.z+(point.z-center.z)*1.65;
+          point.applyMatrix4(inverse);
+          p.setXYZ(i,point.x,point.y,point.z);
+        }
+        p.needsUpdate=true;
+        mesh.geometry.computeVertexNormals();
+        mesh.geometry.computeBoundingBox();
+        mesh.geometry.computeBoundingSphere();
+      });
+      model.updateMatrixWorld(true);
+    }
     async function loadDistantMountain(){
       try{
         if(typeof DecompressionStream!=='function'){
@@ -470,6 +530,7 @@
           loader.parse(bytes,'',resolve,reject)
         );
         const mountain=gltf.scene;
+        groundMountainEdges(mountain);
         let meshCount=0;
         mountain.traverse(mesh=>{
           if(!mesh.isMesh)return;
@@ -483,7 +544,9 @@
             if(!source)return source;
             const m=source.clone();
             m.fog=false;
-            m.side=THREE.DoubleSide;
+            // No mostrar el reverso oscuro del terreno recortado.
+            m.side=THREE.FrontSide;
+            if(m.color)m.color.lerp(new THREE.Color(0xb4c8ca),.23);
             m.depthWrite=true;
             m.needsUpdate=true;
             return m;
@@ -623,11 +686,7 @@
           errorEl.hidden=false;
         }
       }finally{
-        initialTreesReady=true;
-        if(pendingStart&&initialVehicleReady&&initialTrafficReady){
-          pendingStart=false;
-          reset();
-        }
+        initialTreesReady=treeSlots.every(slot=>slot.children.length>0);
       }
     }
 
@@ -1280,8 +1339,9 @@
         });
         installCustomRider(gltf.scene);
       } catch(error) {
-        console.warn('Modelo de persona no disponible; se usa conductor alternativo.',error);
-        if(avatar)avatar.visible=true;
+        console.warn('Modelo de persona no disponible:',error);
+        if(avatar)avatar.visible=false;
+        throw error;
       }
     }
 
@@ -1293,12 +1353,8 @@
     // Impedir que la partida arranque mientras el Yamaha se instala.
     // La carga del GLB es asíncrona; antes podía cambiar el modelo ya jugando.
     let initialVehicleReady=false;
-    let pendingStart=false;
-    loadCitrusTrees();
-    loadRoadsideGrass();
-    loadRoadsideHouses();
-    loadDistantMountain();
-    loadCustomRider();
+    let initialSceneReady=false;
+    // Todas las cargas arrancan juntas al final, con los controles ya creados.
 
     function normalizeImportedModel(model) {
       model.updateMatrixWorld(true);
@@ -1548,24 +1604,12 @@
       fileInput.value = '';
     });
 
-    (async () => {
-      // Primera carga: bloquear COMENZAR hasta recibir el Yamaha.
-      // Ante fallo continuar con el modelo provisional ligero, evitando
-      // descargar el Honda de 21 MB y congelar Safari innecesariamente.
-      try {
-        await loadFourtrax('./assets/yamaha-raptor.glb');
-      } catch (err) {
-        console.warn('Yamaha no disponible; se mantiene el FourTrax provisional.',err);
-        buildFallbackATV();
-        modelStatus.textContent='Vehículo provisional listo';
-      } finally {
-        initialVehicleReady=true;
-        if(pendingStart && initialTrafficReady && initialTreesReady){
-          pendingStart=false;
-          reset();
-        }
-      }
-    })();
+    async function loadInitialYamaha(){
+      await loadFourtrax('./assets/yamaha-raptor.glb');
+      initialVehicleReady=!!(importedModel && modelLoaded &&
+        importedModel.userData.vehicleType==='yamaha-raptor');
+      if(!initialVehicleReady)throw new Error('Yamaha Raptor no disponible');
+    }
 
 
     // Nuevo guía ATV: rotación intuitiva y movimiento en la dirección
@@ -1813,10 +1857,7 @@
           el.hidden=false;
         }
       }finally{
-        initialTrafficReady=true;
-        if(pendingStart&&initialVehicleReady&&initialTreesReady){
-          pendingStart=false;reset();
-        }
+        initialTrafficReady=loadedPassengerPack===true;
       }
     }
 
@@ -2005,11 +2046,7 @@
       }
     }
     resetOncomingCars();
-    // Cargas no bloqueantes: ni el bus ni los diez carros deben
-    // impedir que la partida comience en Safari móvil.
-    loadABCOBus();
-    loadPassengerCarPack();
-    loadVintage1970Truck();
+    // El coordinador de inicio espera también los modelos del tráfico.
 
 
     // Rival rojo. Usa el modelo provisional hasta que cargue el Yamaha
@@ -2762,13 +2799,7 @@
     let crashKind = '';
     let crashFallProgress = 0;
     function reset() {
-      if(!initialVehicleReady || !initialTrafficReady || !initialTreesReady){
-        pendingStart=true;
-        startBtn.hidden=false;
-        startBtn.textContent='CARGANDO ESCENARIO 3D…';
-        messageEl.textContent='PREPARANDO FOURTRACK, CARROS Y ÁRBOLES…';
-        return;
-      }
+      if(!initialSceneReady)return;
       document.body.classList.remove('level-complete');
       document.body.classList.add('playing');
       progressBucket=-1;
@@ -2961,6 +2992,8 @@
       requestAnimationFrame(frame);
       const dt = Math.min((now - last) / 1000, 0.04);
       last = now;
+      // No renderizar ni simular el escenario provisional.
+      if(!initialSceneReady)return;
 
       if (active && !paused) {
         speed = Math.max(0, Math.min(24, speed + (keys.gas ? 9 : -6.4) * dt));
@@ -3100,6 +3133,79 @@
       renderer.render(scene,camera);
     }
 
+    async function prepareInitialScene(){
+      const overlay=document.getElementById('loadingOverlay');
+      const status=document.getElementById('loadingStatus');
+      const count=document.getElementById('loadingCount');
+      const bar=document.getElementById('loadingProgressBar');
+      const progress=document.getElementById('loadingProgress');
+      const retry=document.getElementById('loadingRetry');
+      const jobs=[
+        ['Yamaha Raptor',loadInitialYamaha,()=>initialVehicleReady],
+        ['Conductores 3D',loadCustomRider,()=>!!customRider],
+        ['Árboles',loadCitrusTrees,()=>initialTreesReady],
+        ['Grama',loadRoadsideGrass,()=>!!roadsideGrass],
+        ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
+        ['Montaña',loadDistantMountain,()=>!!distantMountain],
+        ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
+        ['Autobús',loadABCOBus,()=>oncomingCars.some(c=>c.isBus&&c.modelReady)],
+        ['Camioneta',loadVintage1970Truck,()=>oncomingCars.some(c=>c.isTruck&&c.modelReady)]
+      ];
+      let completed=0;
+      const errors=[];
+      const slowTimer=setTimeout(()=>{
+        if(!initialSceneReady){
+          status.textContent='La carga está tardando. Puedes reintentar.';
+          retry.hidden=false;
+        }
+      },75000);
+      await Promise.all(jobs.map(async ([label,load,check])=>{
+        try{
+          await load();
+          if(!check())throw new Error(label+' incompleto');
+        }catch(error){
+          errors.push(label);
+          console.error('Carga inicial:',label,error);
+        }finally{
+          completed++;
+          const pct=Math.round(completed/jobs.length*100);
+          bar.style.width=pct+'%';
+          progress.setAttribute('aria-valuenow',String(pct));
+          count.textContent=completed+' de '+jobs.length+' recursos procesados';
+        }
+      }));
+      clearTimeout(slowTimer);
+      // Nunca revelar los muñecos anteriores si una carga no terminó bien.
+      if(!customRider||!rival.modelMount||!rival.driverRoot)
+        errors.push('Rival 3D');
+      if(errors.length){
+        status.textContent='No se pudo cargar: '+[...new Set(errors)].join(', ');
+        count.textContent='Recarga para volver a intentar con los modelos originales.';
+        retry.hidden=false;
+        return;
+      }
+      if(avatar)avatar.visible=false;
+      status.textContent='Escenario listo';
+      count.textContent='Preparando la primera imagen…';
+      try{
+        updateRoadWrap();
+        camera.position.set(.70,3.50,8.30);
+        camera.lookAt(.48,1.23,-7.20);
+        camera.updateMatrixWorld(true);
+        // Compilar y dibujar la primera imagen bajo la cubierta opaca.
+        renderer.render(scene,camera);
+        initialSceneReady=true;
+        startBtn.disabled=false;
+        startBtn.textContent='COMENZAR';
+        overlay.hidden=true;
+        last=performance.now();
+      }catch(error){
+        console.error('Error preparando primera imagen',error);
+        status.textContent='No se pudo preparar el escenario 3D.';
+        retry.hidden=false;
+      }
+    }
+    prepareInitialScene();
     requestAnimationFrame(frame);
     addEventListener('resize', () => {
       camera.aspect = innerWidth / innerHeight;
