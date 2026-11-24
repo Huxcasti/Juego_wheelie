@@ -2168,38 +2168,45 @@
 
     // Tráfico exterior, aproximaciones suaves y algunos carros que
     // avanzan de frente por la línea de chapitas antes de apartarse.
-    const carLanes = [-4.45,4.45];
-    const COIN_PICKUP_WIDTH=.72;
+    const carLanes = [-4.35,4.35];
+    const COIN_PICKUP_WIDTH=.76;
+    const TRAFFIC_GAP=42;
     let trafficPassNumber=0;
-    // Una ruta de fichas fija por nivel, con variedad y cambios de lado
-    // progresivos. Los conos no deben bloquear el centro de una ficha.
+    // Dispersión irregular reproducible para que cada intento del mapa
+    // conserve las mismas 96 fichas, sin una figura repetida.
     function buildCoinRoute(){
-      const pattern=[-1.85,-.95,.15,1.25,1.9,1.45,.45,-.65,
-        -1.7,-1.1,0,1.1,1.8,.8,-.25,-1.35];
-      const offsets=[0,1.5,-1,1,0,-1.5,1,-.5];
-      const route=Array.from({length:LEVEL_TOTAL_COINS},(_,i)=>{
+      let state=0x47c0a9;
+      const random=()=>{
+        state=(Math.imul(state,1664525)+1013904223)>>>0;
+        return state/4294967296;
+      };
+      const route=[];
+      for(let i=0;i<LEVEL_TOTAL_COINS;i++){
         const at=LEVEL_FIRST_COIN+i*LEVEL_COIN_SPACING+
-          (i===0||i===LEVEL_TOTAL_COINS-1?0:offsets[i%offsets.length]);
-        let lane=pattern[i%pattern.length];
-        // Evitar el lateral ocupado por conos y suavizar la trayectoria
-        // de las fichas vecinas antes y después de cada obstáculo.
+          (i===0||i===LEVEL_TOTAL_COINS-1?0:(random()-.5)*5);
+        const prev=route[i-1];
+        // Pequeños grupos casuales y fichas aisladas, a ambos lados.
+        const desired=prev&&random()<.30?
+          prev.lane+(random()-.5)*.85:(random()*2-1)*2.85;
+        const reach=prev?Math.min(2.5,(at-prev.at)*.19):2.85;
+        const lo=prev?Math.max(-2.85,prev.lane-reach):-2.85;
+        const hi=prev?Math.min(2.85,prev.lane+reach):2.85;
+        let lane=Math.max(lo,Math.min(hi,desired));
         for(const o of obstacles){
           if(o.kind!=='conos')continue;
           const phase=((at+o.baseZ+trackLength*.5)%trackLength+trackLength)%trackLength-trackLength*.5;
-          const proximity=Math.max(0,1-Math.abs(phase)/20);
-          const side=Math.sign(o.group.position.x);
-          if(lane*side>0)lane*=1-proximity;
+          // Dejar la ficha y su zona de recogida fuera de los conos.
+          if(Math.abs(phase)<9){
+            const side=Math.sign(o.group.position.x);
+            if(lane*side>.15)lane=side*.15;
+          }
         }
-        return {at,lane};
-      });
-      // Mantener un desplazamiento alcanzable incluso a 24 m/s.
-      for(let i=1;i<route.length;i++){
-        const prev=route[i-1],p=route[i],limit=(p.at-prev.at)*.115;
-        p.lane=Math.max(prev.lane-limit,Math.min(prev.lane+limit,p.lane));
+        route.push({at,lane});
       }
+      // Corrección hacia atrás para que un cono no fuerce un salto imposible.
       for(let i=route.length-2;i>=0;i--){
-        const p=route[i],next=route[i+1],limit=(next.at-p.at)*.115;
-        p.lane=Math.max(next.lane-limit,Math.min(next.lane+limit,p.lane));
+        const p=route[i],next=route[i+1],reach=Math.min(2.5,(next.at-p.at)*.19);
+        p.lane=Math.max(next.lane-reach,Math.min(next.lane+reach,p.lane));
       }
       return route;
     }
@@ -2207,37 +2214,50 @@
     function trafficLaneAt(car,ahead,worldAt){
       const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
       if(!car.nearCoins)return car.exitLane;
-      // Ruta anclada a una ficha concreta del mundo, no al jugador.
-      // El giro empieza lejos y finaliza antes de alcanzar al FourTrax.
-      const entry=smooth((car.targetAt+58-worldAt)/48);
-      const departure=smooth((car.targetAt-8-worldAt)/37);
-      const approaching=car.startLane+(car.innerLane-car.startLane)*entry;
-      const routed=approaching+(car.exitLane-approaching)*departure;
-      // Prioridad a un tiempo de reacción justo. Si el jugador acelera,
-      // la salida de la zona de monedas sigue ocurriendo a tiempo.
-      const clear=smooth((ahead-42)/40);
-      return car.exitLane+(routed-car.exitLane)*clear;
+      // Cambios visibles desde lejos. No hay persecución ni esquiva
+      // automática del jugador: el carril final puede ser el de una ficha.
+      const enter=smooth((car.entryStart-ahead)/(car.entryStart-car.entryEnd));
+      const first=car.startLane+(car.innerLane-car.startLane)*enter;
+      if(car.trafficMode==='hold')return first;
+      const change=smooth((car.secondStart-ahead)/(car.secondStart-car.secondEnd));
+      return first+(car.exitLane-first)*change;
     }
     function assignTrafficLane(car,pass,at){
       const eligible=car.isPackPlaceholder&&!car.isBus&&!car.isTruck;
-      const startSide=pass%2===0?-1:1;
-      const direct=eligible&&car.ahead>=100&&pass%3!==2;
-      const cross=direct&&pass%4===0;
-      const exitSide=cross?-startSide:startSide;
+      const startSide=Math.random()<.5?-1:1;
       car.startLane=carLanes[startSide===-1?0:1];
-      car.exitLane=carLanes[exitSide===-1?0:1];
-      const spawnAt=at+car.ahead;
-      // Elegir una ficha que el coche puede alcanzar antes del encuentro,
-      // suponiendo que el jugador circula a su velocidad máxima.
-      const target=spawnAt-car.ahead*car.speed/(24+car.speed)*.38;
-      const candidates=coinRoute.filter(c=>c.at<=spawnAt-4&&c.at>=at+25);
-      const coin=candidates.reduce((best,c)=>!best||
-        Math.abs(c.at-target)<Math.abs(best.at-target)?c:best,null);
-      car.targetAt=coin?.at??spawnAt;
+      car.exitLane=car.startLane;
+      car.trafficMode='outer';
+      car.nearCoins=false;
+      car.directCoins=false;
+      const meet=at+Math.max(0,car.ahead)*18/(18+car.speed);
+      const coin=coinRoute.reduce((best,c)=>!best||
+        Math.abs(c.at-meet)<Math.abs(best.at-meet)?c:best,null);
+      car.targetAt=coin?.at??meet;
       car.innerLane=coin?.lane??0;
-      car.nearCoins=direct&&!!coin;
-      car.directCoins=car.nearCoins;
-      car.lane=trafficLaneAt(car,car.ahead,spawnAt);
+      if(eligible&&pass%5!==4){
+        // 2 de cada 5: permanecen en una trayectoria interior hasta pasar.
+        // Otros cruzan o cambian al carril de otra ficha, sin volver
+        // necesariamente al borde. El primero se anuncia desde el menú.
+        const mode=pass%5;
+        car.trafficMode=mode===0||mode===3?'hold':mode===1?'cross':'shift';
+        car.nearCoins=true;
+        car.directCoins=true;
+        if(car.trafficMode==='hold'){
+          car.exitLane=car.innerLane;
+        }else if(car.trafficMode==='cross'){
+          car.exitLane=carLanes[startSide===-1?1:0];
+        }else{
+          const next=coinRoute.reduce((best,c)=>!best||
+            Math.abs(c.at-(meet+15))<Math.abs(best.at-(meet+15))?c:best,null);
+          car.exitLane=next?.lane??-car.innerLane;
+        }
+        car.entryStart=155;
+        car.entryEnd=92;
+        car.secondStart=88;
+        car.secondEnd=52;
+      }
+      car.lane=trafficLaneAt(car,car.ahead,at+car.ahead);
       car.group.rotation.y=0;
     }
     // "Autobus ABCO" por BgirlKittyEmo, CC BY 4.0 (Sketchfab).
@@ -2320,15 +2340,15 @@
         car.ahead=i===5 ? 212+Math.random()*16 :
           i===4 ? 125+Math.random()*13 :
           i>=6 ? 264+(i-6)*46+Math.random()*12 :
-          54+i*41+i*i*2+Math.random()*10;
-        car.speed=8+Math.random()*9; // metros por segundo, hacia el jugador
+          76+i*41+i*i*2+Math.random()*10;
+        car.speed=11+Math.random()*8; // tráfico más rápido, sin aparecer de golpe
         car.group.visible=car.modelReady===true;
       });
       // Separación longitudinal mínima: no crear barreras de dos carros.
       const ordered=[...oncomingCars].sort((a,b)=>a.ahead-b.ahead);
       let previous=-Infinity;
       for(const car of ordered){
-        car.ahead=Math.max(car.ahead,previous+27);
+        car.ahead=Math.max(car.ahead,previous+TRAFFIC_GAP);
         previous=car.ahead;
         assignTrafficLane(car,trafficPassNumber++,0);
         car.group.position.set(car.lane,0,-car.ahead);
@@ -2342,13 +2362,14 @@
         const oldAhead=car.ahead;
         // Los autos viajan en la misma dirección: no atravesarse unos
         // a otros cuando coinciden en un cambio de carril.
-        car.ahead=Math.min(oldAhead,Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+27));
+        car.ahead=Math.min(oldAhead-speed*dt,
+          Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+TRAFFIC_GAP));
         const actualSpeed=Math.max(0,(oldAhead-car.ahead)/Math.max(.001,dt)-speed);
         leadingAhead=car.ahead;
         if(car.ahead < -Math.max(16,car.collisionHalfLength||2)){
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
-          car.ahead=farthest+38+Math.random()*26;
-          car.speed=8+Math.random()*10;
+          car.ahead=farthest+TRAFFIC_GAP+Math.random()*22;
+          car.speed=11+Math.random()*9;
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
           if(loadedPassengerPack && car.isPackPlaceholder){
             installPassengerVariant(car,nextPassengerVariant++);
@@ -2362,7 +2383,7 @@
         // Pequeño giro visual coherente con el desplazamiento lateral.
         const heading=Math.atan2(car.lane-previousLane,Math.max(.001,actualSpeed*dt));
         car.group.rotation.y=THREE.MathUtils.damp(car.group.rotation.y,
-          THREE.MathUtils.clamp(heading,-.12,.12),7,dt);
+          THREE.MathUtils.clamp(heading,-.21,.21),7,dt);
         for(const tire of car.rolling)
           tire.rotation.x+=actualSpeed*dt/(car.wheelRadius||.30);
         if(car.ahead>0&&car.ahead<nearest){nearest=car.ahead;nearestCar=car;}
@@ -2378,11 +2399,14 @@
       }
       if(active && nearest<(nearestCar?.directCoins?115:45)){
         warnEl.classList.add('visible');
-        const inCoinLane=nearestCar?.directCoins&&nearest>42;
-        warnEl.textContent=(inCoinLane?'🚗 CAMBIO DE CARRIL · ':
+        const inCoinLane=nearestCar?.directCoins;
+        const destination=nearestCar?trafficLaneAt(nearestCar,0,distance+nearest):0;
+        const side=destination<-.7?'IZQUIERDA':destination>.7?'DERECHA':'CENTRO';
+        warnEl.textContent=(inCoinLane?'🚗 TRÁFICO HACIA '+side+' · ':
           '🚗 TRÁFICO DE FRENTE · ')+Math.ceil(nearest)+' m';
-        if(tilt<1.4&&(inCoinLane||nearest<15))
-          messageEl.textContent=inCoinLane?'¡PREPÁRATE PARA ESQUIVAR!':'¡ESQUIVA EL CARRO!';
+        if(tilt<1.4&&(inCoinLane||nearest<20))
+          messageEl.textContent=nearest<32?'¡ESQUIVA EL CARRO!':
+            '¡ATENTO AL CAMBIO DE CARRIL!';
       }
     }
     resetOncomingCars();
@@ -2531,7 +2555,7 @@
       lane:3.2,sideVelocity:0,planTimer:0,holdTimer:0,
       steering:0,forwardOffset:6.1
     };
-    const rivalCandidateLanes=[-3.2,-1.1,1.1,3.2];
+    const rivalCandidateLanes=[-4.15,-2.9,-1.4,0,1.4,2.9,4.15];
     function resetRivalAI(){
       rivalAI.lane=3.2;
       rivalAI.sideVelocity=0;
