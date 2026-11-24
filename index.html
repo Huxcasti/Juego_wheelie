@@ -448,6 +448,59 @@
     // Árbol Citrus del GLB del usuario, optimizado de 48 MB a 600 KB
     // comprimidos. Se eliminan los árboles de aspecto geométrico.
     const landscape=[];
+
+    // Montaña rocosa original que aportó el usuario. Se muestra como
+    // silueta distante y NO forma parte de la carretera ni sus colisiones.
+    // La geometría ya viene normalizada: 294 m de ancho x 53 m de alto.
+    let distantMountain=null;
+    const MOUNTAIN_VISUAL_DISTANCE=222;
+    async function loadDistantMountain(){
+      try{
+        if(typeof DecompressionStream!=='function'){
+          throw new Error('Safari requiere soporte para gzip');
+        }
+        const {MOUNTAIN_ASSET_B64}=await import('./assets/mountain-distant-mobile.js?v=mountain1');
+        const compressed=Uint8Array.from(atob(MOUNTAIN_ASSET_B64),
+          c=>c.charCodeAt(0));
+        const bytes=await new Response(
+          new Blob([compressed]).stream()
+            .pipeThrough(new DecompressionStream('gzip'))
+        ).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>
+          loader.parse(bytes,'',resolve,reject)
+        );
+        const mountain=gltf.scene;
+        let meshCount=0;
+        mountain.traverse(mesh=>{
+          if(!mesh.isMesh)return;
+          meshCount++;
+          mesh.castShadow=false;
+          mesh.receiveShadow=false;
+          // El fondo debe permanecer visible a más de 200 m,
+          // incluso donde el resto de la carretera se desvanece.
+          const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+          const updated=materials.map(source=>{
+            if(!source)return source;
+            const m=source.clone();
+            m.fog=false;
+            m.side=THREE.DoubleSide;
+            m.depthWrite=true;
+            m.needsUpdate=true;
+            return m;
+          });
+          mesh.material=Array.isArray(mesh.material)?updated:updated[0];
+        });
+        if(meshCount===0)throw new Error('El archivo no contiene terreno');
+        mountain.name='Montañas lejanas de piedra - fondo';
+        mountain.position.set(0,0,rider.position.z-MOUNTAIN_VISUAL_DISTANCE);
+        scene.add(mountain);
+        distantMountain=mountain;
+        console.info('Montaña distante 3D cargada:',meshCount,'mallas');
+      }catch(err){
+        // El paisaje continúa funcionando si el fondo no descarga.
+        console.warn('No se pudo cargar la montaña lejana:',err);
+      }
+    }
     const treeSlots=[];
     let initialTreesReady=false;
     const poleMat=mat(0x778a94);
@@ -1244,6 +1297,7 @@
     loadCitrusTrees();
     loadRoadsideGrass();
     loadRoadsideHouses();
+    loadDistantMountain();
     loadCustomRider();
 
     function normalizeImportedModel(model) {
@@ -2815,6 +2869,11 @@
     }
 
     function updateRoadWrap() {
+      // El relieve es un decorado de horizonte que mantiene su distancia
+      // y nunca avanza hacia el vehículo al recorrer los 1,200 metros.
+      if(distantMountain){
+        distantMountain.position.z=rider.position.z-MOUNTAIN_VISUAL_DISTANCE;
+      }
       ground.position.z = rider.position.z;
       road.position.z = rider.position.z;
       shoulder.position.z = rider.position.z;
