@@ -362,6 +362,54 @@
       padding:9px 18px;background:#10273c;color:#fff;font-weight:900;touch-action:manipulation}
     #restartCampaign[hidden]{display:none}
     #levelRetry{min-width:180px;touch-action:manipulation}
+
+    /* Selector de etapas y plano del recorrido, accesibles desde la pausa. */
+    #menuMap,#pauseMap,#mapClose,#mapPlay{font:900 clamp(12px,2vw,16px)/1.2 system-ui,sans-serif;
+      color:#f0f8ff;background:#173c51;border:1px solid #a4dcf2;border-radius:12px;
+      padding:10px 20px;min-height:44px;cursor:pointer;touch-action:manipulation}
+    #menuMap{position:fixed;left:50%;top:calc(59% + 43px);transform:translateX(-50%);z-index:16;
+      box-shadow:0 4px 15px #0009;white-space:nowrap}
+    #menuMap[hidden],body.playing #menuMap,body.level-complete #menuMap{display:none}
+    #pauseMessage{top:50%;transform:translate(-50%,-50%);gap:12px}
+    #pauseMap{pointer-events:auto;min-width:152px;background:linear-gradient(#286989,#15354e);box-shadow:0 4px 0 #092438}
+    #levelMapPanel{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+      background:#06121aee;padding:max(8px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right))
+      max(8px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));overflow:auto;touch-action:pan-y}
+    #levelMapPanel[hidden]{display:none}
+    #levelMapCard{box-sizing:border-box;width:min(760px,100%);max-height:100%;overflow:auto;
+      background:linear-gradient(140deg,#163d3b,#102333 68%);border:1px solid #7cbdad;
+      border-radius:18px;padding:14px 18px;color:#fff;box-shadow:0 15px 40px #0009}
+    #mapHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    #mapHeader h2{margin:0;font-size:clamp(17px,3vw,26px);line-height:1.1;letter-spacing:.03em}
+    #mapHeader small{display:block;font-size:10px;color:#b8d2d8;margin-top:4px;font-weight:700}
+    #mapClose{padding:6px 12px;min-height:38px;font-size:12px}
+    #mapJourney{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:36px;margin:12px 0}
+    #mapJourney::before{content:"";position:absolute;left:22%;right:22%;top:50%;
+      border-top:4px dashed #a8bfc2;z-index:0}
+    .mapNode{position:relative;z-index:1;min-width:0;border:1px solid #9ec9c4;background:#173c38;
+      color:#fff;border-radius:14px;padding:9px 12px;text-align:left;cursor:pointer;touch-action:manipulation}
+    .mapNode[data-level="2"]{background:#233d59;border-color:#88abc7}
+    .mapNode.selected{outline:2px solid #fbe68a;outline-offset:2px}
+    .mapNode .nodeTop{display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:clamp(12px,2.2vw,18px);font-weight:900}
+    .mapNode .nodeInfo{display:block;color:#cde0df;font-size:11px;margin-top:4px}
+    .mapNode .nodeStars{color:#ffdd62;font-size:17px;letter-spacing:2px;line-height:1.2}
+    .mapNode .nodeStatus{font-size:10px;color:#fff;display:block;margin-top:3px;font-weight:800}
+    #mapTrackBox{padding:8px 10px;background:#06151c99;border:1px solid #88b8bf44;border-radius:12px}
+    #mapTrackHead{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:800}
+    #routeMapSvg{display:block;width:100%;height:auto;max-height:91px;margin:3px 0}
+    #mapLegend{display:flex;flex-wrap:wrap;gap:5px 13px;color:#d1e5e7;font-size:10px}
+    #mapLegend span{white-space:nowrap}
+    #mapStats{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:#e4f3f1;margin-top:8px}
+    #mapFooter{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px}
+    #mapNote{font-size:11px;color:#b9d2d7;line-height:1.3;margin:0}
+    #mapPlay{background:linear-gradient(#a8ff27,#20b724);color:#05230f;border-color:#d7ff9c;white-space:nowrap}
+    #mapPlay[hidden]{display:none}
+    #mapPlay:disabled{opacity:.52;cursor:default}
+    @media(max-height:420px){#levelMapCard{padding:9px 13px}#mapJourney{margin:8px 0}
+      .mapNode{padding:6px 9px}#mapFooter{margin-top:7px}#routeMapSvg{max-height:67px}
+      #pauseMessage{gap:8px}#menuMap{top:calc(59% + 35px);min-height:36px;padding:7px 16px}}
+    @media(max-width:440px){#mapJourney{gap:16px}#mapFooter{flex-wrap:wrap}#mapPlay{width:100%}
+      #levelMapCard{padding:12px}}
 </style>
 </head>
 <body>
@@ -395,12 +443,41 @@
   <button id="pauseBtn" aria-label="Pausar juego" type="button">Ⅱ</button>
   <div id="pauseMessage"><span>PAUSA</span>
     <button id="pauseRetry" type="button" aria-label="Repetir nivel desde el principio">REPETIR</button>
+    <button id="pauseMap" type="button">🗺 MAPA DE NIVELES</button>
   </div>
   <div id="message"></div>
   <button id="start" disabled>COMENZAR</button>
+  <button id="menuMap" type="button" hidden>🗺 MAPA DE NIVELES</button>
+  <section id="levelMapPanel" role="dialog" aria-modal="true" aria-labelledby="mapHeading" hidden>
+    <div id="levelMapCard">
+      <header id="mapHeader">
+        <div><h2 id="mapHeading">MAPA DE NIVELES</h2><small>WHEELIE CHALLENGE · RECORRIDO</small></div>
+        <button id="mapClose" type="button" aria-label="Cerrar mapa">✕ CERRAR</button>
+      </header>
+      <div id="mapJourney">
+        <button class="mapNode" type="button" data-level="1" aria-pressed="true">
+          <span class="nodeTop"><span>NIVEL 1</span><span aria-hidden="true">☀️</span></span>
+          <span class="nodeInfo">Soleado · 1,200 m</span><span class="nodeStars">☆☆☆</span>
+          <span class="nodeStatus">DISPONIBLE</span>
+        </button>
+        <button class="mapNode" type="button" data-level="2" aria-pressed="false">
+          <span class="nodeTop"><span>NIVEL 2</span><span aria-hidden="true">🌧️</span></span>
+          <span class="nodeInfo">Lluvia · 1,500 m</span><span class="nodeStars">☆☆☆</span>
+          <span class="nodeStatus">🔒 BLOQUEADO</span>
+        </button>
+      </div>
+      <div id="mapTrackBox">
+        <div id="mapTrackHead"><span id="mapTrackTitle">NIVEL 1 · PLANO</span><span id="mapTrackPercent">0%</span></div>
+        <svg id="routeMapSvg" viewBox="0 0 660 86" role="img" aria-label="Plano esquemático de la carretera"></svg>
+        <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>🏁 Meta</span></div>
+      </div>
+      <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
+      <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
+    </div>
+  </section>
   <section id="levelResults" role="dialog" aria-modal="true" aria-labelledby="levelResultTitle">
     <div id="levelResultCard">
-      <h2 id="levelResultTitle">¡MAPA 1 COMPLETADO!</h2>
+      <h2 id="levelResultTitle">¡NIVEL 1 COMPLETADO!</h2>
       <div id="levelStars" aria-label="Estrellas obtenidas">☆☆☆</div>
       <p id="levelCoinResult">0 / 96 chapitas</p>
       <p id="levelResultHint">Recoge todas las chapitas para conseguir 3 estrellas.</p>
@@ -3721,7 +3798,7 @@
     let paused=false;
     const pauseBtn=document.getElementById('pauseBtn');
     pauseBtn.addEventListener('click',()=>{
-      if(!active)return;
+      if(!active||!mapPanel.hidden)return;
       paused=!paused;
       document.body.classList.toggle('paused',paused);
       pauseBtn.textContent=paused?'▶':'Ⅱ';
@@ -3743,7 +3820,7 @@
       if(!steeringTouches.size)setSteer(0);
     }
     addEventListener('keydown',e=>{
-      if(!active||paused||!initialSceneReady)return;
+      if(!active||paused||!initialSceneReady||!mapPanel.hidden)return;
       if(gasCodes.has(e.code)){gasKeys.add(e.code);syncThumbs();e.preventDefault();}
       if(leftCodes.has(e.code)||rightCodes.has(e.code)){
         directionKeys.add(e.code);syncKeyboard();e.preventDefault();
@@ -3901,8 +3978,136 @@
       document.body.classList.toggle('rain-level',wet);
     }
 
+    // El plano es una vista de la carretera REAL (recta y periódica).
+    // Los puntos se calculan de los mismos obstáculos que usa el juego.
+    const mapPanel=document.getElementById('levelMapPanel');
+    const mapNodes=[...document.querySelectorAll('.mapNode')];
+    const mapPlay=document.getElementById('mapPlay');
+    const menuMap=document.getElementById('menuMap');
+    const pauseMap=document.getElementById('pauseMap');
+    const mapClose=document.getElementById('mapClose');
+    let mapSelected=1,mapFromPause=false,mapPreviousFocus=null;
+    function mapStars(level){
+      return Math.max(0,Math.min(3,Math.floor(Number(localStorage.getItem(
+        'wheelie-level-'+level+'-best-stars')||0))||0));
+    }
+    function levelUnlocked(level){
+      return level===1||mapStars(1)>0||currentLevel===2;
+    }
+    function mapObstacles(level){
+      const list=dryObstacles.map(({o,z},i)=>({kind:o.kind,z:level===2?wetObstacleZ[i]:z}));
+      if(level===2)list.push({kind:wetExtraObstacle.kind,z:wetExtraObstacle.baseZ});
+      const out=[];
+      for(const o of list){
+        const first=((-o.z%trackLength)+trackLength)%trackLength;
+        for(let at=first;at<LEVELS[level].length;at+=trackLength){
+          if(at>0)out.push({kind:o.kind,at});
+        }
+      }
+      return out.sort((a,b)=>a.at-b.at);
+    }
+    function mapProgressFor(level){
+      if(level===currentLevel&&(mapFromPause||active||crashKind)){
+        return Math.max(0,Math.min(LEVELS[level].length,distance));
+      }
+      return 0;
+    }
+    function renderLevelMap(){
+      const cfg=LEVELS[mapSelected],unlocked=levelUnlocked(mapSelected);
+      const isCurrent=mapFromPause&&active&&mapSelected===currentLevel;
+      const traveled=mapProgressFor(mapSelected);
+      const percent=Math.floor(traveled/cfg.length*100);
+      for(const node of mapNodes){
+        const n=Number(node.dataset.level),stars=mapStars(n),available=levelUnlocked(n);
+        node.classList.toggle('selected',n===mapSelected);
+        node.setAttribute('aria-pressed',String(n===mapSelected));
+        node.querySelector('.nodeStars').textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
+        node.querySelector('.nodeStatus').textContent=mapFromPause&&n===currentLevel?'● EN PARTIDA':
+          stars?'✓ COMPLETADO':available?'DISPONIBLE':'🔒 BLOQUEADO';
+      }
+      document.getElementById('mapTrackTitle').textContent='NIVEL '+mapSelected+
+        (cfg.wet?' · LLUVIA':' · SOLEADO');
+      document.getElementById('mapTrackPercent').textContent=percent+'%';
+      document.getElementById('mapDistance').textContent='📍 '+Math.floor(traveled).toLocaleString('es-PR')+
+        ' / '+cfg.length.toLocaleString('es-PR')+' m';
+      const goal=Math.floor((cfg.lastCoin-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)+1;
+      document.getElementById('mapCoins').textContent='🟡 Chapitas: '+
+        (isCurrent?coinCount+' / ':'')+goal;
+      document.getElementById('mapBest').textContent='★ Récord: '+mapStars(mapSelected)+' / 3';
+      const startX=28,endX=632,width=endX-startX;
+      const pos=at=>startX+at/cfg.length*width;
+      const playerX=pos(traveled);
+      // Posición exacta a escala; no inventar curvas que no existen.
+      const marks=mapObstacles(mapSelected).map(o=>{
+        const x=pos(o.at).toFixed(2);
+        if(o.kind==='conos')return `<path d="M ${x} 21 l -4 9 h 8 z" fill="#ffab53"/>`;
+        if(o.kind==='badén')return `<path d="M ${x} 56 l 4 4 -4 4 -4 -4 z" fill="#9ad5ff"/>`;
+        return `<rect x="${(+x-2.5).toFixed(2)}" y="56" width="5" height="6" rx="1" fill="#f5d36c"/>`;
+      }).join('');
+      const ticks=Array.from({length:5},(_,i)=>{
+        const at=cfg.length*i/4,x=pos(at);
+        return `<text x="${x}" y="81" text-anchor="middle" font-size="10" fill="#c4d6dc">${at}m</text>`;
+      }).join('');
+      document.getElementById('routeMapSvg').innerHTML=
+        `<rect x="20" y="34" width="620" height="19" rx="9" fill="${cfg.wet?'#405367':'#536468'}"/>
+        <rect x="28" y="35" width="${Math.max(0,playerX-startX)}" height="17" rx="8" fill="#328b63"/>
+        <path d="M28 43.5 H632" stroke="#d4d9c4" stroke-width="1" stroke-dasharray="8 6"/>
+        <circle cx="28" cy="43.5" r="5" fill="#a4f1ba"/>
+        <path d="M628 32 v23" stroke="#fff" stroke-width="2"/>
+        <path d="M629 31 h14 v12 h-14 z" fill="#f8ffff"/>
+        <path d="M629 31 h7 v6 h-7 z M636 37 h7 v6 h-7 z" fill="#233846"/>
+        ${marks}${ticks}
+        ${isCurrent?`<circle cx="${playerX}" cy="43.5" r="8" fill="#afff66" stroke="#183828" stroke-width="2"/>
+        <text x="${Math.max(36,Math.min(624,playerX))}" y="13" text-anchor="middle" fill="#d5ffac" font-size="12" font-weight="bold">TÚ</text>`:''}`;
+      mapPlay.hidden=mapFromPause;
+      mapPlay.disabled=!unlocked;
+      mapPlay.textContent=unlocked?'JUGAR NIVEL '+mapSelected:'🔒 COMPLETA NIVEL 1';
+      document.getElementById('mapNote').textContent=mapFromPause?
+        'Partida en pausa. Puedes revisar ambos niveles sin perder tu progreso.':
+        unlocked?'Selecciona un nivel para comenzar. Las estrellas se guardan en este dispositivo.':
+        'Termina el nivel 1 para desbloquear el recorrido bajo la lluvia.';
+    }
+    function openLevelMap(fromPause){
+      if(!initialSceneReady||(fromPause&&(!active||!paused))||(!fromPause&&active))return;
+      mapFromPause=fromPause;
+      mapSelected=currentLevel;
+      mapPreviousFocus=document.activeElement;
+      clearThumbControls();
+      mapPanel.hidden=false;
+      renderLevelMap();mapClose.focus({preventScroll:true});
+    }
+    function closeLevelMap(){
+      if(mapPanel.hidden)return;
+      mapPanel.hidden=true;
+      if(mapPreviousFocus?.isConnected)mapPreviousFocus.focus({preventScroll:true});
+      mapPreviousFocus=null;
+    }
+    menuMap.addEventListener('click',()=>openLevelMap(false));
+    pauseMap.addEventListener('click',()=>openLevelMap(true));
+    mapClose.addEventListener('click',closeLevelMap);
+    mapPanel.addEventListener('click',e=>{if(e.target===mapPanel)closeLevelMap();});
+    for(const node of mapNodes)node.addEventListener('click',()=>{
+      mapSelected=Number(node.dataset.level);renderLevelMap();
+    });
+    mapPlay.addEventListener('click',()=>{
+      if(mapFromPause||active||!levelUnlocked(mapSelected)||mapPanel.hidden)return;
+      const selected=mapSelected;
+      closeLevelMap();unlockCoinAudio();reset(selected);
+    });
+    addEventListener('keydown',e=>{
+      if(mapPanel.hidden)return;
+      if(e.key==='Escape'){e.preventDefault();closeLevelMap();}
+      else if(e.key==='Tab'){
+        const controls=[...mapPanel.querySelectorAll('button:not([hidden]):not(:disabled)')];
+        const first=controls[0],last=controls[controls.length-1];
+        if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+        else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+      }
+    });
+
     function reset(level=currentLevel) {
       if(!initialSceneReady)return;
+      closeLevelMap();
       nextLevelCountdown=0;
       chooseLevel(level);
       configureLevelObstacles();
@@ -4373,6 +4578,7 @@
         renderer.render(scene,camera);
         initialSceneReady=true;
         startBtn.disabled=false;
+        menuMap.hidden=false;
         startBtn.textContent='COMENZAR';
         overlay.hidden=true;
         last=performance.now();
