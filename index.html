@@ -2407,6 +2407,7 @@
     function beginThumb(id,x,y){
       if(!active||paused||!initialSceneReady||steeringTouches.has(id))return false;
       if(steeringTouches.size>=2)return false;
+      if(!coinAudio||coinAudio.state!=='running')unlockCoinAudio();
       const r=steeringEl.getBoundingClientRect();
       const nx=(x-r.left)/r.width,ny=(y-r.top)/r.height;
       const gas=nx>=.60&&ny>=.38;
@@ -3612,16 +3613,167 @@
     // AudioContext se habilita únicamente con una pulsación del jugador.
     let coinAudio=null;
     let lastCoinChime=-1;
+    // Sonido de motor basado en cinco grabaciones aportadas por el usuario.
+    // Una sola AudioContext (compartida con las chapitas), seis bucles
+    // y dos efectos breves; sin recrear fuentes por fotograma.
+    let engineBuffers=null,engineLoadPromise=null,engineMaster=null;
+    let playerEngine=null,botEngine=null,engineStartPending=false;
+    let engineAudible=false,enginePreviousGas=false,engineRpm=.12,botRpm=.12;
+    let engineStartEffect=null,engineReleaseEffect=null;
+    function loadEngineAudio(){
+      if(!coinAudio)return Promise.resolve(false);
+      if(engineLoadPromise)return engineLoadPromise;
+      engineLoadPromise=(async()=>{
+        try{
+          const {ENGINE_AUDIO}=await import('./assets/banshee-engine-audio.js?v=1');
+          const entries=await Promise.all(Object.entries(ENGINE_AUDIO).map(async ([name,b64])=>{
+            const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+            return [name,await coinAudio.decodeAudioData(bytes.buffer)];
+          }));
+          engineBuffers=Object.fromEntries(entries);
+          if(!['start','idle','mid','high','release'].every(k=>engineBuffers[k]?.duration>0))
+            throw Error('Audio de motor incompleto');
+          engineMaster=coinAudio.createGain();
+          engineMaster.gain.value=0;engineMaster.connect(coinAudio.destination);
+          playerEngine=createEngineVoice(false);
+          botEngine=createEngineVoice(true);
+          return true;
+        }catch(err){
+          console.warn('No se pudo cargar el motor Banshee; el juego continúa.',err);
+          return false;
+        }
+      })();
+      return engineLoadPromise;
+    }
+    function createEngineVoice(isBot){
+      const output=coinAudio.createGain();output.gain.value=0;
+      const filter=coinAudio.createBiquadFilter();
+      filter.type='lowpass';filter.frequency.value=isBot?4200:11000;
+      output.connect(filter);
+      const pan=isBot&&typeof coinAudio.createStereoPanner==='function'?
+        coinAudio.createStereoPanner():null;
+      if(pan){filter.connect(pan);pan.connect(engineMaster);}
+      else filter.connect(engineMaster);
+      const layers={};
+      for(const name of ['idle','mid','high']){
+        const source=coinAudio.createBufferSource();
+        source.buffer=engineBuffers[name];source.loop=true;
+        // Los archivos llevan fundido de unión; evitar el relleno MP3
+        // marginal sin reconstruir las muestras del usuario.
+        source.loopStart=.012;
+        source.loopEnd=Math.max(.025,source.buffer.duration-.012);
+        const gain=coinAudio.createGain();gain.gain.value=0;
+        source.connect(gain);gain.connect(output);
+        source.start(0,isBot?source.buffer.duration*.37:.02);
+        layers[name]={source,gain};
+      }
+      return {output,filter,pan,layers};
+    }
+    const engineClamp=(x,min=0,max=1)=>Math.max(min,Math.min(max,x));
+    function engineMix(rpm){
+      const r=engineClamp(rpm),mid=engineClamp((r-.15)/.40);
+      const high=engineClamp((r-.54)/.36);
+      return {idle:1-mid,mid:mid*(1-high),high};
+    }
+    function setEngineParam(param,value,time=.065){
+      if(!param||!Number.isFinite(value))return;
+      param.setTargetAtTime(value,coinAudio.currentTime,time);
+    }
+    function mixEngineVoice(voice,rpm,volume,extraPitch=1){
+      if(!voice)return;
+      const gains=engineMix(rpm);
+      const pitch={idle:.87+rpm*.65,mid:.78+rpm*.42,high:.84+rpm*.32};
+      for(const name of ['idle','mid','high']){
+        const layer=voice.layers[name];
+        setEngineParam(layer.gain.gain,Math.sqrt(gains[name]),.08);
+        setEngineParam(layer.source.playbackRate,engineClamp(pitch[name]*extraPitch,.65,1.45),.09);
+      }
+      setEngineParam(voice.output.gain,volume,.09);
+    }
+    function stopEngineEffect(effect){
+      if(!effect)return;
+      try{
+        const now=coinAudio.currentTime;
+        effect.gain.gain.cancelScheduledValues(now);
+        effect.gain.gain.setTargetAtTime(0,now,.025);
+        effect.source.stop(now+.12);
+      }catch(err){}
+    }
+    function playEngineEffect(name,volume,rate=1){
+      if(!engineMaster||!engineBuffers?.[name]||coinAudio.state!=='running')return null;
+      const source=coinAudio.createBufferSource(),gain=coinAudio.createGain();
+      source.buffer=engineBuffers[name];source.playbackRate.value=rate;
+      gain.gain.value=volume;
+      source.connect(gain);gain.connect(engineMaster);
+      source.onended=()=>{source.disconnect();gain.disconnect();};
+      source.start();
+      return {source,gain};
+    }
+    function startEngineAttempt(){
+      engineStartPending=true;enginePreviousGas=false;
+      engineRpm=.12;botRpm=.12;
+      stopEngineEffect(engineStartEffect);stopEngineEffect(engineReleaseEffect);
+      engineStartEffect=null;engineReleaseEffect=null;
+      loadEngineAudio();
+    }
+    function quietEngine(){
+      engineAudible=false;
+      if(engineMaster)setEngineParam(engineMaster.gain,0,.035);
+      stopEngineEffect(engineStartEffect);stopEngineEffect(engineReleaseEffect);
+      engineStartEffect=null;engineReleaseEffect=null;
+      enginePreviousGas=false;
+    }
+    function updateEngineAudio(dt){
+      if(!engineMaster||!coinAudio||coinAudio.state!=='running')return;
+      const audible=active&&!paused&&!document.hidden;
+      if(!audible){
+        if(engineAudible)quietEngine();
+        return;
+      }
+      if(!engineAudible){engineAudible=true;setEngineParam(engineMaster.gain,.78,.055);}
+      if(engineStartPending){
+        engineStartPending=false;
+        engineStartEffect=playEngineEffect('start',.28);
+      }
+      const gas=keys.gas;
+      const rolling=engineClamp(speed/22);
+      // El motor sube al tocar GAS aunque todavía no haya velocidad.
+      // Al soltarlo cae suavemente, sin reiniciar los bucles.
+      const target=gas?(.43+.57*rolling):(.12+.25*rolling);
+      engineRpm+=(target-engineRpm)*(1-Math.exp(-Math.max(0,dt)*(gas?4.8:3.4)));
+      if(enginePreviousGas&&!gas&&engineRpm>.40){
+        stopEngineEffect(engineReleaseEffect);
+        engineReleaseEffect=playEngineEffect('release',.16,.90+.25*engineRpm);
+      }else if(gas&&!enginePreviousGas){
+        stopEngineEffect(engineReleaseEffect);engineReleaseEffect=null;
+        stopEngineEffect(engineStartEffect);engineStartEffect=null;
+      }
+      enginePreviousGas=gas;
+      mixEngineVoice(playerEngine,engineRpm,.24+.19*engineRpm);
+      const rivalSpeed=Math.max(0,rivalAI.travelSpeed||0);
+      const botTarget=engineClamp(.12+rivalSpeed/29+
+        (rival.bike.rotation.x>.18?.15:0));
+      botRpm+=(botTarget-botRpm)*(1-Math.exp(-Math.max(0,dt)*3.8));
+      const dx=rival.group.position.x-rider.position.x;
+      const dz=rival.group.position.z-rider.position.z;
+      const separation=Math.hypot(dx,dz);
+      const botVolume=(.15+.06*botRpm)/(1+separation*.14+separation*separation*.003);
+      mixEngineVoice(botEngine,botRpm,botVolume,.94);
+      setEngineParam(botEngine.filter.frequency,engineClamp(7200/(1+separation*.12),750,6500),.13);
+      if(botEngine.pan)setEngineParam(botEngine.pan.pan,engineClamp(dx/7,-.8,.8),.12);
+    }
+
     function unlockCoinAudio(){
       try{
         const AudioClass=window.AudioContext||window.webkitAudioContext;
         if(!AudioClass)return;
         if(!coinAudio)coinAudio=new AudioClass();
-        if(coinAudio.state==='suspended'){
+        if(coinAudio.state!=='running'){
           const resumed=coinAudio.resume();
           if(resumed&&resumed.catch)resumed.catch(()=>{});
         }
-      }catch(err){console.info('Audio de chapitas no disponible',err);}
+        loadEngineAudio();
+      }catch(err){console.info('Audio no disponible',err);}
     }
     function playCoinChime(){
       if(!coinAudio||coinAudio.state!=='running')return;
@@ -3800,6 +3952,7 @@
     pauseBtn.addEventListener('click',()=>{
       if(!active||!mapPanel.hidden)return;
       paused=!paused;
+      if(paused)quietEngine();else unlockCoinAudio();
       document.body.classList.toggle('paused',paused);
       pauseBtn.textContent=paused?'▶':'Ⅱ';
       pauseBtn.setAttribute('aria-label',paused?'Continuar juego':'Pausar juego');
@@ -3809,7 +3962,9 @@
     document.addEventListener('selectstart',e=>e.preventDefault());
     document.addEventListener('dragstart',e=>e.preventDefault());
     window.addEventListener('blur',clearThumbControls);
-    document.addEventListener('visibilitychange',()=>{if(document.hidden)clearThumbControls();});
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden){clearThumbControls();quietEngine();}
+    });
     const gasCodes=new Set(['ArrowUp','Space','KeyW']);
     const leftCodes=new Set(['ArrowLeft','KeyA']);
     const rightCodes=new Set(['ArrowRight','KeyD']);
@@ -4200,6 +4355,7 @@
       last=performance.now();
       messageEl.textContent = levelConfig.wet?'¡NIVEL 2 · LLUVIA!':'¡ACELERA!';
       startBtn.hidden = true;
+      startEngineAttempt();
     }
     document.getElementById('pauseRetry').addEventListener('click',()=>{
       if(!active||!paused||!initialSceneReady)return;
@@ -4242,6 +4398,7 @@
       crashFallProgress = 0;
       document.body.classList.remove('playing');
       active = false;
+      engineStartPending=false;quietEngine();
       clearThumbControls();
       if (elapsed > record) {
         record = elapsed;
@@ -4530,6 +4687,7 @@
       updateTreeWind(paused?0:dt*(levelConfig.wet?1.45:1));
       updateRain(paused||!active?0:dt);
       updateLevelTransition(dt);
+      updateEngineAudio(dt);
       renderer.render(scene,camera);
     }
 
