@@ -1525,6 +1525,58 @@
     const urbanSlots=[];
     let urbanReady=false;
     const urbanWrap=z=>((z+155)%310+310)%310-155;
+    // Aceras de ciudad independientes de la pista y del terreno rural.
+    const urbanSidewalks=[];
+    const urbanConcrete=mat(0xb2b1ae,.92),urbanCurbMat=mat(0xd1cfca,.88);
+    for(const side of [-1,1]){
+      const sidewalk=new THREE.Mesh(new THREE.BoxGeometry(3.65,.20,2000),urbanConcrete);
+      sidewalk.position.set(side*8.075,-.02,0);
+      sidewalk.receiveShadow=true;sidewalk.visible=false;scene.add(sidewalk);
+      urbanSidewalks.push(sidewalk);
+      const curb=new THREE.Mesh(new THREE.BoxGeometry(.24,.22,2000),urbanCurbMat);
+      curb.position.set(side*6.13,-.02,0);
+      curb.receiveShadow=true;curb.visible=false;scene.add(curb);
+      urbanSidewalks.push(curb);
+    }
+    let urbanTreePlan=null;
+    function chooseUrbanTreeLocations(buildings){
+      const locations=[];
+      for(const side of [-1,1]){
+        const blocks=buildings.filter(b=>b.side===side).sort((a,b)=>a.z-b.z);
+        const gaps=[];
+        for(let i=0;i<blocks.length;i++){
+          const a=blocks[i],b=blocks[(i+1)%blocks.length];
+          const start=a.z+a.halfZ,end=b.z+(i===blocks.length-1?310:0)-b.halfZ;
+          if(end-start>=7.2)gaps.push({z:urbanWrap((start+end)*.5),room:end-start});
+        }
+        // Cuatro árboles por lado, separados, en los huecos de fachadas.
+        if(!blocks.length)for(let i=0;i<4;i++)gaps.push({z:urbanWrap(-140+i*77+side*13),room:20});
+        const selected=[];
+        gaps.sort((a,b)=>b.room-a.room||a.z-b.z);
+        for(const gap of gaps){
+          if(selected.length===4)break;
+          if(selected.some(p=>Math.abs(urbanWrap(p.z-gap.z))<34))continue;
+          selected.push(gap);
+        }
+        for(const p of selected)locations.push({side,z:p.z,x:side*9.05});
+      }
+      return locations;
+    }
+    function makeUrbanTreePlan(){
+      const blocks=urbanSlots.map(slot=>({side:Math.sign(slot.position.x),
+        z:slot.userData.baseZ,halfZ:slot.userData.halfZ}));
+      const locations=chooseUrbanTreeLocations(blocks);
+      const plan=new Map();
+      for(const side of [-1,1]){
+        const source=treeSlots.filter(slot=>slot.userData.treeSide===side&&slot.children.length>0);
+        const targets=locations.filter(p=>p.side===side);
+        targets.forEach((p,i)=>{
+          const slot=source[i*6];
+          if(slot)plan.set(slot,p);
+        });
+      }
+      return plan;
+    }
     async function loadLevel3Buildings(){
       if(urbanReady)return;
       try{
@@ -1585,29 +1637,41 @@
       }
     }
     function updateLevel3Buildings(){
-      const show=!!levelConfig.extreme&&urbanReady;
+      const city=!!levelConfig.extreme,show=city&&urbanReady;
+      if(city&&!urbanTreePlan)urbanTreePlan=makeUrbanTreePlan();
       for(const slot of urbanSlots){
         slot.visible=show;
         if(show)slot.position.z=rider.position.z+urbanWrap(slot.userData.baseZ+distance);
       }
-      // Las casas previas se reemplazan sólo en el nivel 3. Mantener
-      // árboles que no se cruzan con el volumen del edificio.
+      for(const sidewalk of urbanSidewalks){
+        sidewalk.visible=city;
+        if(city)sidewalk.position.z=rider.position.z;
+      }
+      // Sólo unos cuantos árboles de calle. Guardar la transformación
+      // y visibilidad originales para restaurar exactamente niveles 1/2.
       for(const group of landscape){
+        const isTree=treeSlots.includes(group)||group.name==='Platanus acerifolia';
         const isHouse=houseSlots.includes(group);
-        let hide=show&&isHouse;
-        if(show&&!hide){
-          hide=urbanSlots.some(slot=>
-            Math.abs(slot.position.x-group.position.x)<slot.userData.halfX+3.6&&
-            Math.abs(urbanWrap(slot.position.z-group.position.z))<slot.userData.halfZ+3.6);
-        }
-        if(hide){
-          if(!('urbanOriginalVisibility' in group.userData))group.userData.urbanOriginalVisibility=group.visible;
-          group.visible=false;
-        }else if('urbanOriginalVisibility' in group.userData){
-          group.visible=group.userData.urbanOriginalVisibility;
-          delete group.userData.urbanOriginalVisibility;
+        if(!isTree&&!isHouse)continue;
+        if(city){
+          if(!group.userData.urbanOriginal){
+            group.userData.urbanOriginal={visible:group.visible,x:group.position.x,y:group.position.y};
+          }
+          const target=isTree?urbanTreePlan.get(group):null;
+          group.visible=!!target;
+          if(target){
+            group.position.x=target.x;
+            group.position.y=.20;
+            group.position.z=rider.position.z+urbanWrap(target.z+distance);
+          }
+        }else if(group.userData.urbanOriginal){
+          const original=group.userData.urbanOriginal;
+          group.visible=original.visible;
+          group.position.x=original.x;group.position.y=original.y;
+          delete group.userData.urbanOriginal;
         }
       }
+      if(!city)urbanTreePlan=null;
     }
 
     async function loadRoadsideHouses(){
@@ -1663,6 +1727,7 @@
       const group=new THREE.Group(),z=-148+i*13;
       group.position.x=side*7.55;
       const post=new THREE.Mesh(new THREE.BoxGeometry(.13,1.1,.13),railPostMat);
+      post.userData.ruralRailPost=true;
       post.position.y=.55;group.add(post);
       if(i%2===0){
         const pole=new THREE.Mesh(new THREE.CylinderGeometry(.065,.085,6.9,7),poleMat);
@@ -4446,8 +4511,16 @@
       renderer.toneMappingExposure=wet?1.24:1.4;
       roadMat.color.setHex(wet?0x303b46:0x525a61);
       roadMat.roughness=wet?.27:.96;
-      groundMat.color.setHex(wet?0x467f40:0x5eae53);
-      shoulderMat.color.setHex(wet?0x795641:0xba7a4b);
+      groundMat.color.setHex(extreme?0x77797c:wet?0x467f40:0x5eae53);
+      shoulderMat.color.setHex(extreme?0x969795:wet?0x795641:0xba7a4b);
+      // Ocultar TODOS los lotes de grama sin descargarlos: pueden
+      // volver a utilizarse al seleccionar el nivel 1 o 2.
+      for(const mesh of [roadsideGrass,meadowGrass,grassFillMesh,
+        ...extraGrassBatches.map(batch=>batch.mesh)])if(mesh)mesh.visible=!extreme;
+      for(const rail of guardrails)rail.visible=!extreme;
+      for(const group of landscape)for(const part of group.children)
+        if(part.userData.ruralRailPost)part.visible=!extreme;
+      if(distantMountain)distantMountain.visible=!extreme;
       for(const cloud of cloudSlots)cloud.visible=!wet;
       rainLines.visible=wet;wetPuddles.visible=wet;
       rainMarkerPosts.visible=wet;rainMarkerReflectors.visible=wet;
@@ -4793,10 +4866,12 @@
       }
       updateLevel3Buildings();
       // El follaje bajo se reutiliza frente a la cámara continuamente.
-      updateRoadsideGrass();
-      updateExtraGrass(force);
-      updateMeadowGrass(force);
-      updateGrassFill(force);
+      if(!levelConfig.extreme){
+        updateRoadsideGrass();
+        updateExtraGrass(force);
+        updateMeadowGrass(force);
+        updateGrassFill(force);
+      }
       updateWetPuddles();
       updateRainRoadMarkers();
     }
