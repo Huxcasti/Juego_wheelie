@@ -1697,39 +1697,23 @@
       for(let i=0;i<7;i++){
         const z=half-(i+.5)*length/7;
         const stripe=new THREE.Mesh(new THREE.PlaneGeometry(width-.16,.18),paint);
-        stripe.rotation.x=-Math.PI/2-Math.atan(height/length);
+        stripe.rotation.x=-Math.PI/2+Math.atan(height/length);
         stripe.position.set(0,.021+height*(half-z)/length,z);group.add(stripe);
       }
       for(const side of [-1,1]){
         const rail=new THREE.Mesh(new THREE.PlaneGeometry(.10,Math.hypot(length,height)),edge);
-        rail.rotation.x=-Math.PI/2-Math.atan(height/length);
+        rail.rotation.x=-Math.PI/2+Math.atan(height/length);
         rail.position.set(side*(w-.08),height*.5+.025,0);group.add(rail);
       }
       group.position.z=baseZ;group.visible=false;scene.add(group);
       return {group,baseZ,kind:'rampa',height,length,width,hit:false};
     }
     for(let i=0;i<extremeRampZ.length;i++){
-      extremeRamps.push(createExtremeRamp(extremeRampZ[i],i%2?2.65:2.35,i%2?8.8:7.8,4.8));
+      extremeRamps.push(createExtremeRamp(extremeRampZ[i],i%2?1.15:1.0,i%2?6.6:5.8,4.8));
     }
     let jumpHeight=0,jumpVelocity=0,jumpActive=false,jumpCount=0;
     let previousRampAxleZ=0,jumpNotice=0;
-    // Física arcade: suficiente altura y tiempo en el aire para pasar
-    // por encima incluso del autobús, sin eliminar las colisiones reales.
-    const JUMP_GRAVITY=11.5;
-    function trafficRoofHeight(car){
-      const measured=car.collisionHeight;
-      return Number.isFinite(measured)&&measured>0?measured:
-        car.isBus?4.0:car.isTruck?2.8:2.2;
-    }
-    function jumpLaunchVelocity(speed,rampHeight,roofHeight){
-      const base=Math.min(11.1,6.6+speed*.205);
-      // La cumbre del salto debe superar el vehículo más alto cargado.
-      const minimum=Math.sqrt(2*JUMP_GRAVITY*Math.max(0,roofHeight+1.25-rampHeight));
-      return Math.max(base,minimum);
-    }
-    function canClearTraffic(airborne,wheelHeight,car){
-      return airborne&&wheelHeight>=trafficRoofHeight(car)+(car.group?.position.y||0)+.30;
-    }
+    const JUMP_GRAVITY=12.8;
     function stepJump(state,dt){
       const velocity=state.velocity-JUMP_GRAVITY*dt;
       const height=Math.max(0,state.height+(state.velocity+velocity)*.5*dt);
@@ -1753,9 +1737,7 @@
             o.hit=true;
             if(speed>=7){
               jumpActive=true;jumpHeight=o.height;
-              const highestRoof=Math.max(4,...oncomingCars.filter(c=>c.modelReady).map(trafficRoofHeight));
-              jumpVelocity=jumpLaunchVelocity(speed,o.height,highestRoof);
-              gasHeldSeconds=0;
+              jumpVelocity=Math.min(4.6,speed*.215);
               jumpNotice=.75;
               break;
             }
@@ -2724,7 +2706,6 @@
         group,rolling,wheelRadius:template.wheelRadius*factor,
         collisionHalfWidth:size.x*factor*.5,
         collisionHalfLength:size.z*factor*.5,
-        collisionHeight:size.y*factor+.03,
         passengerType:template.name
       };
     }
@@ -2881,7 +2862,6 @@
         group.scale.setScalar(truckScale);
         existing.collisionHalfLength=size.z*truckScale*.5;
         existing.collisionHalfWidth=size.x*truckScale*.5;
-        existing.collisionHeight=size.y*truckScale+.04;
         existing.modelReady=true;
         group.visible=true;
         console.info('Camioneta 1970 auténtica cargada',
@@ -2991,9 +2971,7 @@
       let rampAvoid=0;
       for(const z of extremeRampZ){
         const phase=((worldAt+z+trackLength*.5)%trackLength+trackLength)%trackLength-trackLength*.5;
-        const clearance=7+Math.max(0,(car.collisionHalfLength||2)-2);
-        const taper=phase>0?19:28;
-        rampAvoid=Math.max(rampAvoid,1-trafficSmooth((Math.abs(phase)-clearance)/taper));
+        rampAvoid=Math.max(rampAvoid,1-trafficSmooth((Math.abs(phase)-7)/28));
       }
       return planned+(side*4.60-planned)*rampAvoid;
     }
@@ -3100,7 +3078,6 @@
         existing.rolling=[]; // Las gomas pertenecen a la malla real.
         existing.collisionHalfLength=dimensions.z*.5;
         existing.collisionHalfWidth=dimensions.x*.5;
-        existing.collisionHeight=dimensions.y+.03;
         existing.modelLoaded=true;
         existing.modelReady=true;
         existing.group.visible=true;
@@ -3127,7 +3104,6 @@
           if(car.variantIndex!==variant)installPassengerVariant(car,variant);
         }
         car.ahead=ahead;
-        car.clearedByJump=false;
         car.rivalBlocked=false;
         car.speed=randomTrafficSpeed();
         car.actualSpeed=car.speed;
@@ -3207,7 +3183,6 @@
           rival.group.position.z+rivalTrafficExtents(car).z+2;
         if(behindPlayer&&behindBot){
           recycled=true;
-          car.clearedByJump=false;
           leadingAhead=car.ahead;
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
           car.ahead=farthest+levelConfig.gap+Math.random()*(levelConfig.extreme?12:40);
@@ -3252,17 +3227,7 @@
           (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth;
         if(car.ahead>-length && car.ahead<length &&
           Math.abs(car.lane-rider.position.x)<width) {
-          // En el nivel extremo hay que comprobar también el eje Y:
-          // las gomas deben pasar realmente por encima del techo.
-          // Un salto bajo, un aterrizaje sobre un carro o un choque
-          // lateral siguen terminando el intento.
-          if(!canClearTraffic(!!levelConfig.extreme&&jumpActive,jumpHeight,car)){
-            finish('traffic');return;
-          }
-          if(!car.clearedByJump){
-            car.clearedByJump=true;
-            jumpNotice=Math.max(jumpNotice,.65);
-          }
+          finish('traffic');return;
         }
       }
       if(active && nearest<(nearestCar?.directCoins?135:75)){
@@ -4797,17 +4762,10 @@
       if(!Number.isFinite(delta))return;
       // Evitar saltos grandes de cámara por una medida temporal incorrecta
       // de la geometría, p. ej. durante la inicialización del archivo GLB.
-      if(levelConfig.extreme&&(active||jumpActive)){
-        // El límite anterior de 3 m y el ajuste de .22 m/fotograma
-        // dejaban el modelo dentro del techo pese a la física de salto.
-        // Posicionar las gomas traseras exactamente sobre la trayectoria.
-        rider.position.y=Math.max(-.30,rider.position.y+delta);
-      }else{
-        rider.position.y=THREE.MathUtils.clamp(
-          rider.position.y+THREE.MathUtils.clamp(delta,-.22,.22),
-          -.30,3.0
-        );
-      }
+      rider.position.y=THREE.MathUtils.clamp(
+        rider.position.y+THREE.MathUtils.clamp(delta,-.22,.22),
+        -.30,3.0
+      );
       rider.updateWorldMatrix(true,true);
     }
 
@@ -4823,9 +4781,7 @@
       if(!initialSceneReady)return;
 
       if (active && !paused) {
-        const acceleration=jumpActive?(keys.gas?1.3:-.8):
-          (keys.gas?(levelConfig.wet?7.5:8):(levelConfig.wet?-4.7:-5.4));
-        speed = Math.max(0, Math.min(22, speed + acceleration * dt));
+        speed = Math.max(0, Math.min(22, speed + (keys.gas ? (levelConfig.wet?7.5:8) : (levelConfig.wet?-4.7:-5.4)) * dt));
         distance = Math.min(LEVEL_LENGTH,distance+speed*dt);
         updateLevelProgress();
         const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
@@ -4859,7 +4815,7 @@
         // Si se mantiene presionado, el centro de masa se va hacia atrás:
         // alcanza la zona roja y finalmente provoca un vuelco real en el juego.
         // Soltarlo reduce el ángulo y evita la caída.
-        gasHeldSeconds = jumpActive?0:keys.gas ? Math.min(9, gasHeldSeconds + dt) :
+        gasHeldSeconds = keys.gas ? Math.min(9, gasHeldSeconds + dt) :
           Math.max(0, gasHeldSeconds - dt * 2.1);
         const powered = keys.gas && speed > 3.2;
         const risingPitch = Math.max(0, speed - 3.2) * .036;
@@ -4920,7 +4876,7 @@
 
         rider.position.z = -distance;
         updateObstacleGameplay(dt);
-        if(active&&!levelConfig.extreme)updateOncomingTraffic(dt);
+        if(active)updateOncomingTraffic(dt);
         if(active&&levelConfig.extreme&&jumpNotice>0){
           messageEl.textContent=jumpActive?'¡EN EL AIRE! · EQUILIBRA':'¡SALTO LIMPIO! +150 PTS';
         }
@@ -4930,11 +4886,6 @@
         updateAvatarAnimation(dt);
         animateCustomRider(dt);
         keepVehicleAboveRoad();
-        if(active&&levelConfig.extreme)updateOncomingTraffic(dt);
-        if(active&&jumpActive){
-          messageEl.textContent=oncomingCars.some(c=>c.clearedByJump&&Math.abs(c.ahead)<12)?
-            '¡POR ENCIMA DEL TRÁFICO!':'¡EN EL AIRE! · EQUILIBRA';
-        }
         updateContactShadows();
         updateRoadWrap();
       }
@@ -4956,8 +4907,8 @@
       // hay una distancia grande, reencuadrar inmediatamente al jugador.
       const targetCamera=new THREE.Vector3(
         rider.position.x*.72+.70,
-        3.5+THREE.MathUtils.clamp(rider.position.y,-.25,levelConfig.extreme?18:3)*(levelConfig.extreme?.82:.4),
-        rider.position.z+8.3+(levelConfig.extreme?Math.max(0,rider.position.y)*.20:0)
+        3.5+THREE.MathUtils.clamp(rider.position.y,-.25,3.0)*.4,
+        rider.position.z+8.3
       );
       const cameraGap=camera.position.distanceToSquared(targetCamera);
       if(!Number.isFinite(cameraGap) || cameraGap>225){
@@ -4967,7 +4918,7 @@
       }
       camera.lookAt(
         rider.position.x*.72+.48,
-        1.23+THREE.MathUtils.clamp(rider.position.y,-.25,levelConfig.extreme?18:3)*(levelConfig.extreme?.72:.23),
+        1.23+THREE.MathUtils.clamp(rider.position.y,-.25,3.0)*.23,
         rider.position.z-7.2
       );
       updateClouds(paused?0:dt);
