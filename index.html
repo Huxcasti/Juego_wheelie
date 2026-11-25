@@ -405,7 +405,7 @@
     #mapFooter{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px}
     #mapNote{font-size:11px;color:#b9d2d7;line-height:1.3;margin:0}
     #mapPlay{background:linear-gradient(#a8ff27,#20b724);color:#05230f;border-color:#d7ff9c;white-space:nowrap}
-    #mapPlay[hidden]{display:none}
+    #mapPlay[hidden],#urbanCredit[hidden]{display:none!important}
     #mapPlay:disabled{opacity:.52;cursor:default}
     @media(max-height:420px){#levelMapCard{padding:9px 13px}#mapJourney{margin:8px 0}
       .mapNode{padding:6px 9px}#mapFooter{margin-top:7px}#routeMapSvg{max-height:67px}
@@ -485,6 +485,7 @@
         <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>◢ Rampa</span><span>🏁 Meta</span></div>
       </div>
       <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
+      <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
       <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
     </div>
   </section>
@@ -1518,6 +1519,97 @@
       registerScenery(slot,z);
       houseSlots.push(slot);
     }
+    // Edificios originales del usuario: "buildings" de Elbolillo,
+    // CC BY 4.0, https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9
+    // Texturas comprimidas; las 17 mallas, UV y materiales se conservan.
+    const urbanSlots=[];
+    let urbanReady=false;
+    const urbanWrap=z=>((z+155)%310+310)%310-155;
+    async function loadLevel3Buildings(){
+      if(urbanReady)return;
+      try{
+        const {BUILDINGS_GZIP}=await import('./assets/level3-buildings.js?v=1');
+        const packed=Uint8Array.from(atob(BUILDINGS_GZIP),c=>c.charCodeAt(0));
+        const bytes=await new Response(new Blob([packed]).stream()
+          .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>loader.parse(bytes,'',resolve,reject));
+        gltf.scene.updateWorldMatrix(true,true);
+        const templates=[];
+        gltf.scene.traverse(obj=>{
+          if(!obj.isMesh)return;
+          // Cada malla del archivo corresponde a un edificio o pieza
+          // independiente. Conservar su transformación mundial, pero
+          // recolocarla para formar una calle en vez de una maqueta.
+          const copy=obj.clone(false);
+          copy.matrix.copy(obj.matrixWorld);copy.matrixAutoUpdate=false;
+          copy.castShadow=false;copy.receiveShadow=false;
+          const group=new THREE.Group();group.add(copy);
+          group.updateWorldMatrix(true,true);
+          const b=new THREE.Box3().setFromObject(group);
+          const size=b.getSize(new THREE.Vector3());
+          if(size.x>.2&&size.y>.2&&size.z>.2)templates.push({group,size});
+        });
+        if(templates.length!==17)throw Error('Modelo urbano incompleto: '+templates.length);
+        // Alternar las fachadas y escalas con separación suficiente:
+        // nueve piezas a la izquierda y ocho a la derecha por tramo.
+        for(let i=0;i<templates.length;i++){
+          const {group:model,size}=templates[i];
+          const side=i%2===0?-1:1;
+          const row=Math.floor(i/2),count=side<0?9:8;
+          const slot=new THREE.Group();
+          slot.name='Nivel 3 · Edificio '+(i+1);
+          const orient=new THREE.Group();
+          orient.rotation.y=side<0?Math.PI/2:-Math.PI/2;
+          const scale=Math.min(1.04,13.8/size.y,24/size.x,11.5/size.z);
+          orient.scale.setScalar(scale);orient.add(model);slot.add(orient);
+          slot.updateWorldMatrix(true,true);
+          const bounds=new THREE.Box3().setFromObject(orient);
+          const center=bounds.getCenter(new THREE.Vector3());
+          const dimensions=bounds.getSize(new THREE.Vector3());
+          orient.position.set(-center.x,ground.position.y-bounds.min.y+.02,-center.z);
+          // Acera exterior del arcén (7.5 m): ningún edificio toca asfalto.
+          const inner=10.2+(row%3)*1.1;
+          slot.position.x=side*(inner+dimensions.x*.5);
+          slot.userData.baseZ=urbanWrap(-24-row*310/count+(side>0?-17:0));
+          slot.userData.halfX=dimensions.x*.5;
+          slot.userData.halfZ=dimensions.z*.5;
+          slot.position.z=slot.userData.baseZ;
+          slot.visible=false;scene.add(slot);urbanSlots.push(slot);
+        }
+        urbanReady=true;
+        console.info('Nivel 3: edificios originales cargados',urbanSlots.length);
+      }catch(err){
+        for(const slot of urbanSlots)scene.remove(slot);
+        urbanSlots.length=0;urbanReady=false;
+        console.warn('No se cargaron los edificios nuevos; se conserva el paisaje.',err);
+      }
+    }
+    function updateLevel3Buildings(){
+      const show=!!levelConfig.extreme&&urbanReady;
+      for(const slot of urbanSlots){
+        slot.visible=show;
+        if(show)slot.position.z=rider.position.z+urbanWrap(slot.userData.baseZ+distance);
+      }
+      // Las casas previas se reemplazan sólo en el nivel 3. Mantener
+      // árboles que no se cruzan con el volumen del edificio.
+      for(const group of landscape){
+        const isHouse=houseSlots.includes(group);
+        let hide=show&&isHouse;
+        if(show&&!hide){
+          hide=urbanSlots.some(slot=>
+            Math.abs(slot.position.x-group.position.x)<slot.userData.halfX+3.6&&
+            Math.abs(urbanWrap(slot.position.z-group.position.z))<slot.userData.halfZ+3.6);
+        }
+        if(hide){
+          if(!('urbanOriginalVisibility' in group.userData))group.userData.urbanOriginalVisibility=group.visible;
+          group.visible=false;
+        }else if('urbanOriginalVisibility' in group.userData){
+          group.visible=group.userData.urbanOriginalVisibility;
+          delete group.userData.urbanOriginalVisibility;
+        }
+      }
+    }
+
     async function loadRoadsideHouses(){
       const names=[
         './assets/house-casa-mobile.js',
@@ -4435,6 +4527,7 @@
     }
     function renderLevelMap(){
       const cfg=LEVELS[mapSelected],unlocked=levelUnlocked(mapSelected);
+      document.getElementById('urbanCredit').hidden=mapSelected!==3;
       const isCurrent=mapFromPause&&active&&mapSelected===currentLevel;
       const traveled=mapProgressFor(mapSelected);
       const percent=Math.floor(traveled/cfg.length*100);
@@ -4698,6 +4791,7 @@
       for (const group of landscape) {
         group.position.z = rider.position.z + ((((group.userData.baseZ + distance + sceneryOffset + 155) % 310) + 310) % 310 - 155);
       }
+      updateLevel3Buildings();
       // El follaje bajo se reutiliza frente a la cámara continuamente.
       updateRoadsideGrass();
       updateExtraGrass(force);
@@ -4947,6 +5041,7 @@
         ['Grama adicional',loadExtraGrass,()=>extraGrassReady],
         ['Grama nueva',loadMeadowGrass,()=>!!meadowGrass],
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
+        ['Edificios del nivel 3',loadLevel3Buildings,()=>true],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
         ['Nubes',loadClouds,()=>true],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
