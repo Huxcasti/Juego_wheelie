@@ -485,7 +485,7 @@
         <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>◢ Rampa</span><span>🏁 Meta</span></div>
       </div>
       <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
-      <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
+      <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Semáforos: <a href="https://sketchfab.com/3d-models/traffic-light-semaforo-1e120134a77944929519d8f96a5f3998" target="_blank" rel="noopener" style="color:inherit">NEB-ART</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
       <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
     </div>
   </section>
@@ -1538,6 +1538,65 @@
       curb.receiveShadow=true;curb.visible=false;scene.add(curb);
       urbanSidewalks.push(curb);
     }
+    // Semáforo original del usuario, NEB-ART, CC BY 4.0.
+    // https://sketchfab.com/3d-models/traffic-light-semaforo-1e120134a77944929519d8f96a5f3998
+    const citySignals=[];
+    let citySignalsReady=false;
+    async function loadCitySignals(){
+      if(citySignalsReady)return;
+      try{
+        const {TRAFFIC_LIGHT_GZIP}=await import('./assets/level3-traffic-light.js?v=1');
+        const packed=Uint8Array.from(atob(TRAFFIC_LIGHT_GZIP),c=>c.charCodeAt(0));
+        const bytes=await new Response(new Blob([packed]).stream()
+          .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>loader.parse(bytes,'',resolve,reject));
+        const original=gltf.scene;
+        original.updateMatrixWorld(true);
+        const bounds=new THREE.Box3().setFromObject(original);
+        const size=bounds.getSize(new THREE.Vector3());
+        if(!Number.isFinite(size.y)||size.y<.1||size.y<size.x||size.y<size.z)
+          throw Error('Dimensiones del semáforo inválidas');
+        const scale=3.85/size.y;
+        const center=bounds.getCenter(new THREE.Vector3());
+        const model=new THREE.Group();
+        original.scale.multiplyScalar(scale);
+        original.position.set(-center.x*scale,-bounds.min.y*scale,-center.z*scale);
+        original.traverse(obj=>{
+          if(!obj.isMesh)return;
+          obj.castShadow=false;obj.receiveShadow=true;
+          for(const m of Array.isArray(obj.material)?obj.material:[obj.material]){
+            if(m?.map)m.map.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+            if(m?.emissiveMap)m.emissiveIntensity=1.25;
+          }
+        });
+        model.add(original);
+        // Cinco pares por tramo de 310 m. En la acera, separados
+        // de las farolas, árboles y fachadas; nunca dentro del carril.
+        for(let i=0;i<5;i++)for(const side of [-1,1]){
+          const slot=new THREE.Group();
+          slot.name='Ciudad · Semáforo '+(i+1)+(side<0?' izquierdo':' derecho');
+          const copy=model.clone(true);
+          copy.rotation.y=side<0?Math.PI:0;
+          slot.add(copy);
+          slot.position.set(side*6.85,.085,0);
+          slot.userData.baseZ=urbanWrap(-28-i*62+(side<0?-7:0));
+          slot.position.z=slot.userData.baseZ;
+          slot.visible=false;scene.add(slot);citySignals.push(slot);
+        }
+        citySignalsReady=citySignals.length===10;
+        console.info('Semáforos urbanos originales:',citySignals.length);
+      }catch(err){
+        for(const slot of citySignals)scene.remove(slot);
+        citySignals.length=0;citySignalsReady=false;
+        console.warn('Semáforos no disponibles; el juego continúa.',err);
+      }
+    }
+    function updateCitySignals(city){
+      for(const slot of citySignals){
+        slot.visible=city&&citySignalsReady;
+        if(slot.visible)slot.position.z=rider.position.z+urbanWrap(slot.userData.baseZ+distance);
+      }
+    }
     let urbanTreePlan=null;
     function chooseUrbanTreeLocations(buildings){
       const locations=[];
@@ -1639,6 +1698,7 @@
     function updateLevel3Buildings(){
       const city=!!levelConfig.extreme,show=city&&urbanReady;
       if(city&&!urbanTreePlan)urbanTreePlan=makeUrbanTreePlan();
+      updateCitySignals(city);
       for(const slot of urbanSlots){
         slot.visible=show;
         if(show)slot.position.z=rider.position.z+urbanWrap(slot.userData.baseZ+distance);
@@ -5117,6 +5177,7 @@
         ['Grama nueva',loadMeadowGrass,()=>!!meadowGrass],
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
         ['Edificios del nivel 3',loadLevel3Buildings,()=>true],
+        ['Semáforos del nivel 3',loadCitySignals,()=>true],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
         ['Nubes',loadClouds,()=>true],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
