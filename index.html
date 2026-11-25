@@ -410,6 +410,11 @@
       #pauseMessage{gap:8px}#menuMap{top:calc(59% + 35px);min-height:36px;padding:7px 16px}}
     @media(max-width:440px){#mapJourney{gap:16px}#mapFooter{flex-wrap:wrap}#mapPlay{width:100%}
       #levelMapCard{padding:12px}}
+    #engineSoundBtn{pointer-events:auto;touch-action:manipulation;min-height:30px;padding:5px 9px;
+      border:1px solid #a6d9f2;background:#0d293de8;color:#fff;border-radius:10px;
+      font:800 11px/1.1 system-ui,sans-serif;white-space:nowrap;cursor:pointer}
+    #engineSoundBtn[hidden]{display:none}
+    #engineSoundBtn:focus-visible{outline:2px solid #fff}
 </style>
 </head>
 <body>
@@ -433,6 +438,7 @@
     <div id="raceCounters">
       <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
       <div id="levelProgress" aria-live="off">NIVEL 1 · 0 / 1200 m</div>
+      <button id="engineSoundBtn" type="button" aria-label="Reactivar sonido del motor o cambiar modo de compatibilidad" hidden>🔊 SONIDO</button>
     </div>
   </div>
   <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
@@ -2407,7 +2413,7 @@
     function beginThumb(id,x,y){
       if(!active||paused||!initialSceneReady||steeringTouches.has(id))return false;
       if(steeringTouches.size>=2)return false;
-      if(!coinAudio||coinAudio.state!=='running')unlockCoinAudio();
+      if(!webEngineReady()||nativePreferred&&!nativePlaying)unlockCoinAudio();
       const r=steeringEl.getBoundingClientRect();
       const nx=(x-r.left)/r.width,ny=(y-r.top)/r.height;
       const gas=nx>=.60&&ny>=.38;
@@ -3620,12 +3626,101 @@
     let playerEngine=null,botEngine=null,engineStartPending=false;
     let engineAudible=false,enginePreviousGas=false,engineRpm=.12,botRpm=.12;
     let engineStartEffect=null,engineReleaseEffect=null;
+    // Safari puede suspender Web Audio al regresar de otra aplicación.
+    // Preparar también un elemento multimedia nativo, con los mismos
+    // sonidos del usuario, para activarlo dentro del gesto de pulsación.
+    const engineSoundBtn=document.getElementById('engineSoundBtn');
+    let engineAsset=null,engineAssetPromise=null,nativeEngine=null;
+    let nativePreferred=false,nativePlaying=false,nativePending=false;
+    let engineDecodeFailed=false,audioStatus='';
+    function soundStatus(label){
+      if(label===audioStatus)return;
+      audioStatus=label;engineSoundBtn.textContent=label;
+    }
+    function enablePlaybackSession(){
+      try{if(navigator.audioSession)navigator.audioSession.type='playback';}
+      catch(err){}
+    }
+    function prepareEngineAsset(){
+      if(engineAsset)return Promise.resolve(engineAsset);
+      if(engineAssetPromise)return engineAssetPromise;
+      engineAssetPromise=import('./assets/banshee-engine-audio.js?v=2').then(({ENGINE_AUDIO})=>{
+        if(!ENGINE_AUDIO?.idle)throw Error('Falta el audio del motor');
+        engineAsset=ENGINE_AUDIO;
+        if(!nativeEngine){
+          nativeEngine=new Audio();
+          nativeEngine.preload='auto';nativeEngine.loop=true;
+          nativeEngine.src='data:audio/mpeg;base64,'+ENGINE_AUDIO.idle;
+          nativeEngine.volume=.9;
+          nativeEngine.preservesPitch=false;
+          if('webkitPreservesPitch' in nativeEngine)nativeEngine.webkitPreservesPitch=false;
+          nativeEngine.load();
+        }
+        return engineAsset;
+      }).catch(err=>{
+        engineAssetPromise=null;console.warn('Error de recursos de audio',err);return null;
+      });
+      return engineAssetPromise;
+    }
+    function playNativeEngine(){
+      if(!nativeEngine||nativePending||(!nativeEngine.paused&&nativePlaying))return;
+      enablePlaybackSession();
+      nativePending=true;
+      try{
+        const promise=nativeEngine.play();
+        Promise.resolve(promise).then(()=>{
+          nativePending=false;
+          nativePlaying=true;
+          if(!active||paused||document.hidden||(!nativePreferred&&webEngineReady())){
+            stopNativeEngine();return;
+          }
+          soundStatus('🔊 MODO iOS');
+        }).catch(err=>{
+          nativePending=false;nativePlaying=false;
+          if(!webEngineReady()||nativePreferred)soundStatus('🔊 ACTIVAR SONIDO');
+          console.info('Safari requiere otra pulsación para el motor',err);
+        });
+      }catch(err){nativePending=false;nativePlaying=false;soundStatus('🔊 ACTIVAR SONIDO');}
+    }
+    function stopNativeEngine(){
+      if(nativeEngine&&!nativeEngine.paused)nativeEngine.pause();
+      nativePlaying=false;
+    }
+    function webEngineReady(){
+      return !!(engineMaster&&playerEngine&&botEngine&&coinAudio?.state==='running');
+    }
+    function syncNativeEngine(dt){
+      if(!nativeEngine)return;
+      const gas=keys.gas,rolling=engineClamp(speed/22);
+      const target=gas?.42+.58*rolling:.12+.25*rolling;
+      engineRpm+=(target-engineRpm)*(1-Math.exp(-Math.max(0,dt)*(gas?4.8:3.4)));
+      // El modo compatible usa un solo bucle para evitar restricciones
+      // de múltiples pistas multimedia simultáneas en Safari/iPhone.
+      nativeEngine.playbackRate=engineClamp(.85+engineRpm*1.10,.85,1.95);
+      if(!nativeEngine.paused)nativePlaying=true;
+      if(nativePlaying)soundStatus('🔊 MODO iOS');
+    }
+    engineSoundBtn.addEventListener('click',()=>{
+      enablePlaybackSession();
+      // Pulsar cuando Web Audio parece estar activo permite probar el
+      // reproductor multimedia directo incluso si no se oye en iOS.
+      nativePreferred=!nativePreferred;
+      if(nativePreferred){
+        if(engineMaster){engineMaster.gain.cancelScheduledValues(coinAudio.currentTime);engineMaster.gain.value=0;}
+        engineAudible=false;
+        playNativeEngine();
+        if(!nativeEngine){prepareEngineAsset();soundStatus('🔊 ACTIVAR SONIDO');}
+      }else{stopNativeEngine();}
+      unlockCoinAudio();
+      if(!active||paused)stopNativeEngine();
+    });
     function loadEngineAudio(){
       if(!coinAudio)return Promise.resolve(false);
       if(engineLoadPromise)return engineLoadPromise;
       engineLoadPromise=(async()=>{
         try{
-          const {ENGINE_AUDIO}=await import('./assets/banshee-engine-audio.js?v=1');
+          const ENGINE_AUDIO=await prepareEngineAsset();
+          if(!ENGINE_AUDIO)throw Error('No se descargaron los sonidos');
           const entries=await Promise.all(Object.entries(ENGINE_AUDIO).map(async ([name,b64])=>{
             const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
             return [name,await coinAudio.decodeAudioData(bytes.buffer)];
@@ -3637,9 +3732,12 @@
           engineMaster.gain.value=0;engineMaster.connect(coinAudio.destination);
           playerEngine=createEngineVoice(false);
           botEngine=createEngineVoice(true);
+          engineDecodeFailed=false;
           return true;
         }catch(err){
           console.warn('No se pudo cargar el motor Banshee; el juego continúa.',err);
+          engineDecodeFailed=true;
+          if(!nativePlaying)soundStatus('🔊 ACTIVAR SONIDO');
           return false;
         }
       })();
@@ -3650,8 +3748,9 @@
       const filter=coinAudio.createBiquadFilter();
       filter.type='lowpass';filter.frequency.value=isBot?4200:11000;
       output.connect(filter);
-      const pan=isBot&&typeof coinAudio.createStereoPanner==='function'?
-        coinAudio.createStereoPanner():null;
+      let pan=null;
+      try{if(isBot&&typeof coinAudio.createStereoPanner==='function')pan=coinAudio.createStereoPanner();}
+      catch(err){}
       if(pan){filter.connect(pan);pan.connect(engineMaster);}
       else filter.connect(engineMaster);
       const layers={};
@@ -3718,19 +3817,31 @@
     }
     function quietEngine(){
       engineAudible=false;
+      stopNativeEngine();
       if(engineMaster)setEngineParam(engineMaster.gain,0,.035);
       stopEngineEffect(engineStartEffect);stopEngineEffect(engineReleaseEffect);
       engineStartEffect=null;engineReleaseEffect=null;
       enginePreviousGas=false;
     }
     function updateEngineAudio(dt){
-      if(!engineMaster||!coinAudio||coinAudio.state!=='running')return;
       const audible=active&&!paused&&!document.hidden;
       if(!audible){
-        if(engineAudible)quietEngine();
+        if(engineAudible||nativePlaying)quietEngine();
         return;
       }
-      if(!engineAudible){engineAudible=true;setEngineParam(engineMaster.gain,.78,.055);}
+      if(nativePreferred||!webEngineReady()){
+        if(engineAudible){
+          engineAudible=false;
+          if(engineMaster)setEngineParam(engineMaster.gain,0,.035);
+        }
+        syncNativeEngine(dt);
+        if(!nativePlaying&&!nativePending&&(engineDecodeFailed||coinAudio?.state!=='running'))
+          soundStatus('🔊 ACTIVAR SONIDO');
+        return;
+      }
+      if(nativePlaying||nativePending)stopNativeEngine();
+      soundStatus('🔊 SONIDO');
+      if(!engineAudible){engineAudible=true;setEngineParam(engineMaster.gain,1,.055);}
       if(engineStartPending){
         engineStartPending=false;
         engineStartEffect=playEngineEffect('start',.28);
@@ -3749,7 +3860,7 @@
         stopEngineEffect(engineStartEffect);engineStartEffect=null;
       }
       enginePreviousGas=gas;
-      mixEngineVoice(playerEngine,engineRpm,.24+.19*engineRpm);
+      mixEngineVoice(playerEngine,engineRpm,.64+.28*engineRpm);
       const rivalSpeed=Math.max(0,rivalAI.travelSpeed||0);
       const botTarget=engineClamp(.12+rivalSpeed/29+
         (rival.bike.rotation.x>.18?.15:0));
@@ -3764,16 +3875,28 @@
     }
 
     function unlockCoinAudio(){
+      enablePlaybackSession();
+      // Activar el reproductor en el propio clic/toque, no después de
+      // esperar una importación o de entrar en requestAnimationFrame.
+      if(nativePreferred||!webEngineReady())playNativeEngine();
       try{
         const AudioClass=window.AudioContext||window.webkitAudioContext;
-        if(!AudioClass)return;
-        if(!coinAudio)coinAudio=new AudioClass();
+        if(!AudioClass){soundStatus('🔊 MODO iOS');return;}
+        if(!coinAudio){
+          coinAudio=new AudioClass();
+          // Pulso silencioso para desbloquear la salida de Safari.
+          const primer=coinAudio.createBufferSource();
+          primer.buffer=coinAudio.createBuffer(1,128,coinAudio.sampleRate);
+          primer.connect(coinAudio.destination);
+          primer.onended=()=>primer.disconnect();
+          primer.start(0);
+        }
         if(coinAudio.state!=='running'){
           const resumed=coinAudio.resume();
-          if(resumed&&resumed.catch)resumed.catch(()=>{});
+          if(resumed&&resumed.catch)resumed.catch(()=>soundStatus('🔊 ACTIVAR SONIDO'));
         }
         loadEngineAudio();
-      }catch(err){console.info('Audio no disponible',err);}
+      }catch(err){console.info('Audio no disponible',err);soundStatus('🔊 ACTIVAR SONIDO');}
     }
     function playCoinChime(){
       if(!coinAudio||coinAudio.state!=='running')return;
@@ -4371,11 +4494,10 @@
     }
     startBtn.addEventListener('click',()=>{
       if(active||!initialSceneReady)return;
-      unlockCoinAudio();
       // En una nueva visita, COMENZAR abre el selector si ya hay
       // progreso; REINTENTAR siempre repite el nivel de la caída.
       if(!crashKind&&levelUnlocked(2)){openLevelMap(false);return;}
-      reset();
+      unlockCoinAudio();reset();
     });
     levelRetryBtn.addEventListener('click',()=>{
       unlockCoinAudio();advanceLevel();
@@ -4699,6 +4821,7 @@
       const progress=document.getElementById('loadingProgress');
       const retry=document.getElementById('loadingRetry');
       const jobs=[
+        ['Sonido del Banshee',prepareEngineAsset,()=>true],
         ['Guía y acelerador',loadHandlebarArt,()=>throttleArt.complete&&throttleArt.naturalWidth>0],
         ['Yamaha Raptor',loadInitialYamaha,()=>initialVehicleReady],
         ['Conductores 3D',loadCustomRider,()=>!!customRider],
@@ -4779,6 +4902,8 @@
         initialSceneReady=true;
         startBtn.disabled=false;
         menuMap.hidden=false;
+        engineSoundBtn.hidden=false;
+        soundStatus('🔊 SONIDO');
         startBtn.textContent=levelUnlocked(2)?'ESCOGER NIVEL':'COMENZAR';
         overlay.hidden=true;
         last=performance.now();
