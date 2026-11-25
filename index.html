@@ -383,12 +383,14 @@
     #mapHeader h2{margin:0;font-size:clamp(17px,3vw,26px);line-height:1.1;letter-spacing:.03em}
     #mapHeader small{display:block;font-size:10px;color:#b8d2d8;margin-top:4px;font-weight:700}
     #mapClose{padding:6px 12px;min-height:38px;font-size:12px}
-    #mapJourney{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:36px;margin:12px 0}
+    #mapJourney{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:12px 0}
     #mapJourney::before{content:"";position:absolute;left:22%;right:22%;top:50%;
       border-top:4px dashed #a8bfc2;z-index:0}
     .mapNode{position:relative;z-index:1;min-width:0;border:1px solid #9ec9c4;background:#173c38;
       color:#fff;border-radius:14px;padding:9px 12px;text-align:left;cursor:pointer;touch-action:manipulation}
     .mapNode[data-level="2"]{background:#233d59;border-color:#88abc7}
+    .mapNode[data-level="3"]{background:#643527;border-color:#ffa56b}
+    @media(max-width:440px){#mapJourney .mapNode{padding:6px 5px}#mapJourney .nodeInfo{font-size:9px}#mapJourney .nodeStatus{font-size:8px}#mapJourney .nodeStars{font-size:13px;letter-spacing:0}}
     .mapNode.selected{outline:2px solid #fbe68a;outline-offset:2px}
     .mapNode .nodeTop{display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:clamp(12px,2.2vw,18px);font-weight:900}
     .mapNode .nodeInfo{display:block;color:#cde0df;font-size:11px;margin-top:4px}
@@ -471,11 +473,16 @@
           <span class="nodeInfo">Lluvia · 1,500 m</span><span class="nodeStars">☆☆☆</span>
           <span class="nodeStatus">🔒 BLOQUEADO</span>
         </button>
+        <button class="mapNode" type="button" data-level="3" aria-pressed="false">
+          <span class="nodeTop"><span>NIVEL 3</span><span aria-hidden="true">🔥</span></span>
+          <span class="nodeInfo">Extremo · 1,860 m</span><span class="nodeStars">☆☆☆</span>
+          <span class="nodeStatus">🔒 BLOQUEADO</span>
+        </button>
       </div>
       <div id="mapTrackBox">
         <div id="mapTrackHead"><span id="mapTrackTitle">NIVEL 1 · PLANO</span><span id="mapTrackPercent">0%</span></div>
         <svg id="routeMapSvg" viewBox="0 0 660 86" role="img" aria-label="Plano esquemático de la carretera"></svg>
-        <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>🏁 Meta</span></div>
+        <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>◢ Rampa</span><span>🏁 Meta</span></div>
       </div>
       <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
       <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
@@ -1584,7 +1591,8 @@
     // Mantener un espacio libre entre la última chapita y la meta.
     const LEVELS=Object.freeze({
       1:{length:1200,lastCoin:1164,gap:66,minCarSpeed:8,maxCarSpeed:14,firstCar:120,laneChangeChance:.40,wet:false},
-      2:{length:1500,lastCoin:1464,gap:57,minCarSpeed:9,maxCarSpeed:16,firstCar:105,laneChangeChance:.50,wet:true}
+      2:{length:1500,lastCoin:1464,gap:57,minCarSpeed:9,maxCarSpeed:16,firstCar:105,laneChangeChance:.50,wet:true},
+      3:{length:1860,lastCoin:1824,gap:32,minCarSpeed:14,maxCarSpeed:24,firstCar:76,laneChangeChance:.88,wet:false,extreme:true}
     });
     let currentLevel=1,levelConfig=LEVELS[1];
     let LEVEL_LENGTH=1200,LEVEL_LAST_COIN=1164;
@@ -1593,7 +1601,7 @@
     function chooseLevel(number){
       if(!LEVELS[number])throw Error('Nivel no disponible');
       currentLevel=number;levelConfig=LEVELS[number];
-      sceneryOffset=levelConfig.wet?87:0;
+      sceneryOffset=levelConfig.extreme?153:levelConfig.wet?87:0;
       LEVEL_LENGTH=levelConfig.length;LEVEL_LAST_COIN=levelConfig.lastCoin;
       LEVEL_TOTAL_COINS=Math.floor((LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)+1;
     }
@@ -1670,17 +1678,99 @@
     addCones(-266,-1);
     const wetExtraObstacle=obstacles.pop();
     wetExtraObstacle.group.visible=false;
+    // Rampas del circuito extremo: cuñas sólidas con franjas de aviso.
+    const extremeRampZ=[-52,-128,-213,-286];
+    const extremeObstacleZ=[-20,-88,-108,-169,-190,-252,-306];
+    const extremeRamps=[];
+    function createExtremeRamp(baseZ,height,length,width){
+      const group=new THREE.Group(),half=length/2,w=width/2;
+      const g=new THREE.BufferGeometry();
+      const vertices=[-w,0,half,w,0,half,-w,height,-half,w,height,-half,-w,0,-half,w,0,-half];
+      g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+      g.setIndex([0,1,2,1,3,2,2,3,4,3,5,4,0,2,4,1,5,3,0,4,1,1,4,5]);
+      g.computeVertexNormals();
+      const rampMat=mat(0x383d45,.55);rampMat.side=THREE.DoubleSide;
+      const mesh=new THREE.Mesh(g,rampMat);mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
+      const paint=new THREE.MeshBasicMaterial({color:0xffbb25,side:THREE.DoubleSide});
+      const edge=new THREE.MeshBasicMaterial({color:0xece9d6,side:THREE.DoubleSide});
+      // Franjas sobre la pendiente, sin geometría ni luces costosas.
+      for(let i=0;i<7;i++){
+        const z=half-(i+.5)*length/7;
+        const stripe=new THREE.Mesh(new THREE.PlaneGeometry(width-.16,.18),paint);
+        stripe.rotation.x=-Math.PI/2+Math.atan(height/length);
+        stripe.position.set(0,.021+height*(half-z)/length,z);group.add(stripe);
+      }
+      for(const side of [-1,1]){
+        const rail=new THREE.Mesh(new THREE.PlaneGeometry(.10,Math.hypot(length,height)),edge);
+        rail.rotation.x=-Math.PI/2+Math.atan(height/length);
+        rail.position.set(side*(w-.08),height*.5+.025,0);group.add(rail);
+      }
+      group.position.z=baseZ;group.visible=false;scene.add(group);
+      return {group,baseZ,kind:'rampa',height,length,width,hit:false};
+    }
+    for(let i=0;i<extremeRampZ.length;i++){
+      extremeRamps.push(createExtremeRamp(extremeRampZ[i],i%2?1.15:1.0,i%2?6.6:5.8,4.8));
+    }
+    let jumpHeight=0,jumpVelocity=0,jumpActive=false,jumpCount=0;
+    let previousRampAxleZ=0,jumpNotice=0;
+    const JUMP_GRAVITY=12.8;
+    function stepJump(state,dt){
+      const velocity=state.velocity-JUMP_GRAVITY*dt;
+      const height=Math.max(0,state.height+(state.velocity+velocity)*.5*dt);
+      return {height,velocity,landed:height===0&&velocity<0};
+    }
+    function rampSurface(o,z,x){
+      if(Math.abs(x-o.group.position.x)>o.width/2)return 0;
+      const t=(o.group.position.z+o.length*.5-z)/o.length;
+      return t>=0&&t<=1?o.height*t:0;
+    }
+    function updateExtremeJump(dt){
+      if(!levelConfig.extreme)return;
+      const axleZ=rider.position.z+rearAxleZ*.9*ATV_SCALE;
+      const before=previousRampAxleZ;
+      previousRampAxleZ=axleZ;
+      jumpNotice=Math.max(0,jumpNotice-dt);
+      if(!jumpActive){
+        for(const o of extremeRamps){
+          const lip=o.group.position.z-o.length*.5;
+          if(!o.hit&&before>lip&&axleZ<=lip&&Math.abs(rider.position.x)<o.width*.5-playerHalfWidth*.65){
+            o.hit=true;
+            if(speed>=7){
+              jumpActive=true;jumpHeight=o.height;
+              jumpVelocity=Math.min(4.6,speed*.215);
+              jumpNotice=.75;
+              break;
+            }
+          }
+        }
+      }
+      if(jumpActive){
+        const next=stepJump({height:jumpHeight,velocity:jumpVelocity},dt);
+        jumpHeight=next.height;jumpVelocity=next.velocity;
+        surfaceContactHeight=Math.max(surfaceContactHeight,jumpHeight);
+        if(next.landed){
+          jumpActive=false;jumpHeight=0;jumpVelocity=0;
+          if(tilt>1.32){finish('backflip');return;}
+          jumpCount++;score+=150;scoreEl.textContent=formatScore(score);
+          jumpNotice=1.15;
+        }
+      }
+    }
     function configureLevelObstacles(){
       obstacles.length=0;
       for(let i=0;i<dryObstacles.length;i++){
         const {o,z,x}=dryObstacles[i];
-        o.baseZ=levelConfig.wet?wetObstacleZ[i]:z;
-        o.group.position.x=levelConfig.wet&&o.kind==='conos'?-x:x;
+        o.baseZ=levelConfig.extreme?extremeObstacleZ[i]:levelConfig.wet?wetObstacleZ[i]:z;
+        o.group.position.x=(levelConfig.wet||levelConfig.extreme)&&o.kind==='conos'?-x:x;
         o.hit=false;o.group.visible=true;obstacles.push(o);
       }
       wetExtraObstacle.group.visible=levelConfig.wet;
       wetExtraObstacle.hit=false;
       if(levelConfig.wet)obstacles.push(wetExtraObstacle);
+      for(const ramp of extremeRamps){
+        ramp.group.visible=!!levelConfig.extreme;ramp.hit=false;
+        if(levelConfig.extreme)obstacles.push(ramp);
+      }
       positionObstacles(0);
     }
 
@@ -1721,6 +1811,7 @@
       let height=0;
       for(const o of obstacles){
         if(o.kind==='conos')continue;
+        if(o.kind==='rampa'){height=Math.max(height,rampSurface(o,z,x));continue;}
         const t=(z-o.group.position.z)/o.length+.5;
         if(t>0&&t<1)height=Math.max(height,o.height*Math.sin(Math.PI*t));
       }
@@ -1734,12 +1825,14 @@
       // Con wheelie se apoya atrás. La altura se resuelve solo UNA vez.
       surfaceContactHeight=tilt>.18?rearHeight:surfaceHeight;
       // El badén desestabiliza el wheelie, más notable a velocidad alta.
-      if(surfaceHeight>.04)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
+      if(surfaceHeight>.04&&!jumpActive)tilt=Math.max(-.05,tilt+(frontHeight-rearHeight)*dt*Math.min(3,speed*.12));
+      updateExtremeJump(dt);
+      if(!active)return;
       for(const o of obstacles){
         if(o.kind!=='conos'||o.hit)continue;
         const inZ=Math.abs(o.group.position.z-rider.position.z)<.85*ATV_SCALE;
         const inX=Math.abs(o.group.position.x-rider.position.x)<.65+playerHalfWidth;
-        if(inZ&&inX){
+        if(inZ&&inX&&jumpHeight<.85){
           o.hit=true;
           finish('cones');
           return; // Colisión fatal: termina el intento inmediatamente.
@@ -1748,10 +1841,10 @@
       let closest=null;
       for(const o of obstacles){
         const d=rider.position.z-o.group.position.z;
-        if(d>0&&d<36&&(!closest||d<closest.d))closest={o,d};
+        if(d>0&&d<(levelConfig.extreme?55:36)&&(!closest||d<closest.d))closest={o,d};
       }
       if(closest){
-        warnEl.textContent='⚠ '+(closest.o.kind==='conos'?'CONOS':closest.o.kind==='badén'?'BADÉN':'REDUCTOR')+' · '+Math.ceil(closest.d)+' m';
+        warnEl.textContent='⚠ '+(closest.o.kind==='conos'?'CONOS':closest.o.kind==='badén'?'BADÉN':closest.o.kind==='rampa'?'RAMPA':'REDUCTOR')+' · '+Math.ceil(closest.d)+' m';
         warnEl.classList.add('visible');
       }else warnEl.classList.remove('visible');
     }
@@ -2850,8 +2943,8 @@
       const base=rawTrafficLane(car,ahead);
       // Lejos del jugador: los carros pueden circular literalmente por
       // encima de las chapitas. Cerca: reservar la zona de recogida.
-      const protection=trafficSmooth((125-ahead)/55);
-      if(protection===0)return base;
+      const protection=levelConfig.extreme?trafficSmooth((48-ahead)/32)*.58:trafficSmooth((125-ahead)/55);
+      if(protection===0&&!levelConfig.extreme)return base;
       // Lado fijo durante cada pasada: nunca saltar de izquierda a
       // derecha para abrir paso a una moneda.
       const side=car.protectSide||Math.sign(car.exitLane)||1;
@@ -2871,7 +2964,16 @@
         magnitude=Math.max(magnitude,required*weight);
       }
       const safe=side*Math.min(4.60,magnitude);
-      return base+(safe-base)*protection;
+      const planned=base+(safe-base)*protection;
+      if(!levelConfig.extreme)return planned;
+      // El tráfico evita las rampas centrales; queda espacio real para
+      // saltar. Anticipar la maniobra con 35 m de transición.
+      let rampAvoid=0;
+      for(const z of extremeRampZ){
+        const phase=((worldAt+z+trackLength*.5)%trackLength+trackLength)%trackLength-trackLength*.5;
+        rampAvoid=Math.max(rampAvoid,1-trafficSmooth((Math.abs(phase)-7)/28));
+      }
+      return planned+(side*4.60-planned)*rampAvoid;
     }
     function assignTrafficLane(car,pass,at){
       const eligible=car.isPackPlaceholder&&!car.isBus&&!car.isTruck;
@@ -2890,7 +2992,7 @@
       const mode=Math.random();
       if(eligible&&mode<levelConfig.laneChangeChance){
         // La mayoría va por fuera; algunos todavía cambian de carril.
-        car.trafficMode=mode<.15?'hold':mode<.27?'cross':'shift';
+        car.trafficMode=levelConfig.extreme?(mode<.26?'hold':mode<.60?'cross':'shift'):(mode<.15?'hold':mode<.27?'cross':'shift');
         car.nearCoins=true;
         car.directCoins=true;
         if(car.trafficMode==='hold'){
@@ -2905,7 +3007,11 @@
         car.entryStart=205+Math.random()*35;
         car.entryEnd=155+Math.random()*12;
         car.secondStart=car.entryEnd-6-Math.random()*5;
-        car.secondEnd=95+Math.random()*12;
+        car.secondEnd=levelConfig.extreme?25+Math.random()*18:95+Math.random()*12;
+        if(levelConfig.extreme){
+          car.entryStart=140+Math.random()*25;car.entryEnd=85+Math.random()*12;
+          car.secondStart=car.entryEnd-6-Math.random()*5;
+        }
       }
       car.protectSide=Math.sign(car.exitLane)||startSide;
       car.lane=trafficLaneAt(car,car.ahead,at+car.ahead);
@@ -3005,7 +3111,7 @@
         car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=car.modelReady===true;
         // Distancias distintas sin perder el margen longitudinal mínimo.
-        ahead+=levelConfig.gap+Math.random()*40;
+        ahead+=levelConfig.gap+Math.random()*(levelConfig.extreme?12:40);
       }
     }
     // Barrido de cajas en el plano XZ: detectar contacto durante todo
@@ -3079,7 +3185,7 @@
           recycled=true;
           leadingAhead=car.ahead;
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
-          car.ahead=farthest+levelConfig.gap+Math.random()*40;
+          car.ahead=farthest+levelConfig.gap+Math.random()*(levelConfig.extreme?12:40);
           car.speed=randomTrafficSpeed();
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
           if(loadedPassengerPack && car.isPackPlaceholder){
@@ -4148,7 +4254,7 @@
       const bucket=Math.floor(distance/5);
       if(bucket===progressBucket)return;
       progressBucket=bucket;
-      mapProgressEl.textContent='NIVEL '+currentLevel+(levelConfig.wet?' · LLUVIA · ':' · ')+
+      mapProgressEl.textContent='NIVEL '+currentLevel+(levelConfig.extreme?' · EXTREMO · ':levelConfig.wet?' · LLUVIA · ':' · ')+
         Math.min(LEVEL_LENGTH,Math.floor(distance))+' / '+LEVEL_LENGTH+' m';
     }
     const timeEl = document.getElementById('time');
@@ -4236,14 +4342,14 @@
       rainMarkerReflectors.instanceMatrix.needsUpdate=true;
     }
     function applyLevelWeather(){
-      const wet=levelConfig.wet;
-      scene.background.setHex(wet?0x617887:0x82d6ff);
-      scene.fog.color.setHex(wet?0x758997:0xa8dded);
+      const wet=levelConfig.wet,extreme=!!levelConfig.extreme;
+      scene.background.setHex(extreme?0xffb574:wet?0x617887:0x82d6ff);
+      scene.fog.color.setHex(extreme?0xf2b38a:wet?0x758997:0xa8dded);
       scene.fog.near=wet?32:65;scene.fog.far=wet?132:250;
       hemi.color.setHex(wet?0xc4d7e8:0xffffff);
       hemi.groundColor.setHex(wet?0x445748:0x587257);
       hemi.intensity=wet?1.65:2.2;
-      sun.color.setHex(wet?0xc0d3e8:0xffffff);
+      sun.color.setHex(extreme?0xffc18a:wet?0xc0d3e8:0xffffff);
       sun.intensity=wet?.85:2.2;
       renderer.toneMappingExposure=wet?1.24:1.4;
       roadMat.color.setHex(wet?0x303b46:0x525a61);
@@ -4277,15 +4383,18 @@
       try{
         const saved=JSON.parse(storage.getItem(CAMPAIGN_KEY)||'null');
         if(Array.isArray(saved?.completed)){
-          state.completed=[...new Set(saved.completed.filter(n=>n===1||n===2))];
+          state.completed=[...new Set(saved.completed.filter(n=>Number.isInteger(n)&&n>=1&&n<=3))];
         }
-        for(const level of [1,2]){
+        for(const level of [1,2,3]){
           if(Number(storage.getItem('wheelie-level-'+level+'-best-stars')||0)>0&&
             !state.completed.includes(level))state.completed.push(level);
         }
-        if(state.completed.includes(2)&&!state.completed.includes(1))state.completed.push(1);
+        // Migración: los guardados existentes conservan niveles y estrellas.
+        const highest=Math.max(0,...state.completed);
+        for(let n=1;n<highest;n++)if(!state.completed.includes(n))state.completed.push(n);
         state.completed.sort((a,b)=>a-b);
-        state.unlocked=state.completed.includes(1)||saved?.unlocked===2?2:1;
+        const previouslyUnlocked=Number.isInteger(saved?.unlocked)?Math.max(1,Math.min(3,saved.unlocked)):1;
+        state.unlocked=Math.max(previouslyUnlocked,Math.min(3,highest+1));
       }catch(error){console.warn('No se pudo leer el progreso de niveles',error);}
       return state;
     }
@@ -4296,18 +4405,19 @@
     }
     function markLevelCompleted(level){
       if(!campaignProgress.completed.includes(level))campaignProgress.completed.push(level);
-      if(level===1||level===2)campaignProgress.unlocked=2;
+      campaignProgress.unlocked=Math.max(campaignProgress.unlocked,Math.min(3,level+1));
       campaignProgress.completed.sort((a,b)=>a-b);
       persistCampaign();
     }
     persistCampaign();
     function levelUnlocked(level){
-      return level===1||(level===2&&campaignProgress.unlocked>=2);
+      return Number.isInteger(level)&&!!LEVELS[level]&&level<=campaignProgress.unlocked;
     }
 
     function mapObstacles(level){
-      const list=dryObstacles.map(({o,z},i)=>({kind:o.kind,z:level===2?wetObstacleZ[i]:z}));
+      const list=dryObstacles.map(({o,z},i)=>({kind:o.kind,z:level===3?extremeObstacleZ[i]:level===2?wetObstacleZ[i]:z}));
       if(level===2)list.push({kind:wetExtraObstacle.kind,z:wetExtraObstacle.baseZ});
+      if(level===3)for(const z of extremeRampZ)list.push({kind:'rampa',z});
       const out=[];
       for(const o of list){
         const first=((-o.z%trackLength)+trackLength)%trackLength;
@@ -4337,7 +4447,7 @@
           campaignProgress.completed.includes(n)?'✓ COMPLETADO':available?'DISPONIBLE':'🔒 BLOQUEADO';
       }
       document.getElementById('mapTrackTitle').textContent='NIVEL '+mapSelected+
-        (cfg.wet?' · LLUVIA':' · SOLEADO');
+        (cfg.extreme?' · EXTREMO':cfg.wet?' · LLUVIA':' · SOLEADO');
       document.getElementById('mapTrackPercent').textContent=percent+'%';
       document.getElementById('mapDistance').textContent='📍 '+Math.floor(traveled).toLocaleString('es-PR')+
         ' / '+cfg.length.toLocaleString('es-PR')+' m';
@@ -4351,6 +4461,7 @@
       // Posición exacta a escala; no inventar curvas que no existen.
       const marks=mapObstacles(mapSelected).map(o=>{
         const x=pos(o.at).toFixed(2);
+        if(o.kind==='rampa')return `<path d="M ${(+x-5).toFixed(2)} 30 l 10 -9 v9 z" fill="#f36f39" stroke="#ffda78" stroke-width=".6"/>`;
         if(o.kind==='conos')return `<path d="M ${x} 21 l -4 9 h 8 z" fill="#ffab53"/>`;
         if(o.kind==='badén')return `<path d="M ${x} 56 l 4 4 -4 4 -4 -4 z" fill="#9ad5ff"/>`;
         return `<rect x="${(+x-2.5).toFixed(2)}" y="56" width="5" height="6" rx="1" fill="#f5d36c"/>`;
@@ -4372,11 +4483,11 @@
         <text x="${Math.max(36,Math.min(624,playerX))}" y="13" text-anchor="middle" fill="#d5ffac" font-size="12" font-weight="bold">TÚ</text>`:''}`;
       mapPlay.hidden=mapFromPause;
       mapPlay.disabled=!unlocked;
-      mapPlay.textContent=unlocked?'JUGAR NIVEL '+mapSelected:'🔒 COMPLETA NIVEL 1';
+      mapPlay.textContent=unlocked?'JUGAR NIVEL '+mapSelected:'🔒 COMPLETA NIVEL '+(mapSelected-1);
       document.getElementById('mapNote').textContent=mapFromPause?
-        'Partida en pausa. Puedes revisar ambos niveles sin perder tu progreso.':
+        'Partida en pausa. Puedes revisar los tres niveles sin perder tu progreso.':
         unlocked?'Selecciona un nivel para comenzar. Tu progreso y estrellas quedan guardados en este dispositivo.':
-        'Termina el nivel 1 para desbloquear el recorrido bajo la lluvia.';
+        'Termina el nivel '+(mapSelected-1)+' para desbloquear este recorrido.';
     }
     function openLevelMap(fromPause){
       if(!initialSceneReady||(fromPause&&(!active||!paused))||(!fromPause&&active))return;
@@ -4450,6 +4561,8 @@
       rider.rotation.set(0,0,0);
       positionObstacles(0);
       surfaceContactHeight=0;
+      jumpHeight=0;jumpVelocity=0;jumpActive=false;jumpCount=0;jumpNotice=0;
+      previousRampAxleZ=rearAxleZ*.9*ATV_SCALE;
       warnEl.classList.remove('visible');
       wasWheelie = false;
       rider.position.set(0, 0, 0);
@@ -4476,7 +4589,7 @@
       updateRain(0);
       timeEl.textContent='0.00 s';angleEl.textContent='0°';
       last=performance.now();
-      messageEl.textContent = levelConfig.wet?'¡NIVEL 2 · LLUVIA!':'¡ACELERA!';
+      messageEl.textContent = levelConfig.extreme?'¡NIVEL 3 · EXTREMO!':levelConfig.wet?'¡NIVEL 2 · LLUVIA!':'¡ACELERA!';
       startBtn.hidden = true;
       startEngineAttempt();
     }
@@ -4490,7 +4603,7 @@
     const levelTitleEl=document.getElementById('levelResultTitle');
     function advanceLevel(){
       if(active||crashKind!=='level')return;
-      reset(currentLevel===1?2:currentLevel);
+      reset(Math.min(3,currentLevel+1));
     }
     startBtn.addEventListener('click',()=>{
       if(active||!initialSceneReady)return;
@@ -4507,7 +4620,7 @@
       unlockCoinAudio();reset(1);
     });
     function updateLevelTransition(dt){
-      if(active||crashKind!=='level'||currentLevel!==1||nextLevelCountdown<=0)return;
+      if(active||crashKind!=='level'||currentLevel>=3||nextLevelCountdown<=0)return;
       nextLevelCountdown=Math.max(0,nextLevelCountdown-dt);
       if(nextLevelCountdown===0){advanceLevel();return;}
       levelRetryBtn.textContent='CONTINUAR · '+Math.ceil(nextLevelCountdown)+' s';
@@ -4547,10 +4660,10 @@
         const bestStars=Math.max(stars,Number(localStorage.getItem(starKey)||0));
         localStorage.setItem(starKey,String(bestStars));
         levelTitleEl.textContent='¡NIVEL '+currentLevel+' COMPLETADO!';
-        campaignBtn.hidden=currentLevel===1;
+        campaignBtn.hidden=currentLevel<3;
         progressBucket=-1;updateLevelProgress();
-        nextLevelCountdown=currentLevel===1?3:0;
-        levelRetryBtn.textContent=currentLevel===1?'CONTINUAR · 3 s':'REPETIR NIVEL 2';
+        nextLevelCountdown=currentLevel<3?3:0;
+        levelRetryBtn.textContent=currentLevel<3?'CONTINUAR · 3 s':'REPETIR NIVEL 3';
         resultsStarsEl.textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
         resultsStarsEl.setAttribute('aria-label',stars+' de 3 estrellas');
         resultsCoinsEl.textContent='🟡 '+coinCount+' / '+LEVEL_TOTAL_COINS+' chapitas';
@@ -4558,8 +4671,8 @@
           '¡Perfecto! Recogiste todas las chapitas. Mejor nivel: 3 estrellas.' :
           'Mejor resultado: '+bestStars+
           ' estrellas. Para conseguir 3 necesitas todas las chapitas.';
-        if(currentLevel===1)resultsHintEl.textContent+=' Nivel 2 desbloqueado y guardado. Comienza automáticamente en 3 segundos.';
-        else resultsHintEl.textContent+=' ¡Completaste los dos niveles!';
+        if(currentLevel<3)resultsHintEl.textContent+=' Nivel '+(currentLevel+1)+' desbloqueado y guardado. Comienza automáticamente en 3 segundos.';
+        else resultsHintEl.textContent+=' ¡Completaste los tres niveles! Saltos: '+jumpCount+'.';
         messageEl.textContent='';
         document.body.classList.add('level-complete');
         startBtn.hidden=true;
@@ -4624,10 +4737,10 @@
       for(const item of contactShadows){
         item.mesh.position.set(
           rider.position.x+item.side*.80*ATV_SCALE,
-          surfaceContactHeight+.023,
+          (jumpActive?0:surfaceContactHeight)+.023,
           rider.position.z+(item.front?-.75:.75)*ATV_SCALE
         );
-        item.mesh.material.opacity=item.front?.43*(1-rise*.93):.51;
+        item.mesh.material.opacity=(item.front?.43*(1-rise*.93):.51)*(jumpActive?.5:1);
       }
     }
 
@@ -4679,7 +4792,7 @@
         lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,levelConfig.wet?10:13,dt);
         const rollingSpeed=speed>.20?speed:0;
         const traction=THREE.MathUtils.clamp(rollingSpeed/2.8,0,1);
-        const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction*(levelConfig.wet?.90:1);
+        const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction*(levelConfig.wet?.90:jumpActive?.48:1);
         steerVelocity=rollingSpeed===0?0:
           THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,levelConfig.wet?10:16,dt);
         if(rollingSpeed>0){
@@ -4707,7 +4820,7 @@
         const powered = keys.gas && speed > 3.2;
         const risingPitch = Math.max(0, speed - 3.2) * .036;
         const holdPitch = Math.max(0, gasHeldSeconds - 1.7) * .17;
-        const targetAngle = powered ? Math.min(1.82, .10 + risingPitch + holdPitch) : 0;
+        const targetAngle = jumpActive ? (powered?.45:0.04) : powered ? Math.min(1.82, .10 + risingPitch + holdPitch) : 0;
         tilt = THREE.MathUtils.damp(tilt, targetAngle, powered ? 1.65 : 2.35, dt);
         tilt = Math.max(-.035, tilt);
 
@@ -4763,7 +4876,10 @@
 
         rider.position.z = -distance;
         updateObstacleGameplay(dt);
-        updateOncomingTraffic(dt);
+        if(active)updateOncomingTraffic(dt);
+        if(active&&levelConfig.extreme&&jumpNotice>0){
+          messageEl.textContent=jumpActive?'¡EN EL AIRE! · EQUILIBRA':'¡SALTO LIMPIO! +150 PTS';
+        }
         rearPivot.position.set(0, rearAxleY, rearAxleZ);
         vehicle.position.set(0, -rearAxleY, -rearAxleZ);
         rearPivot.rotation.x = tilt;
