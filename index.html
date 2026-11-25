@@ -3991,9 +3991,42 @@
       return Math.max(0,Math.min(3,Math.floor(Number(localStorage.getItem(
         'wheelie-level-'+level+'-best-stars')||0))||0));
     }
-    function levelUnlocked(level){
-      return level===1||mapStars(1)>0||currentLevel===2;
+    // Guardado independiente de las estrellas. Migrar las partidas de
+    // versiones anteriores y nunca bloquear de nuevo un nivel superado.
+    const CAMPAIGN_KEY='wheelie-campaign-progress-v1';
+    function loadCampaignProgress(storage){
+      const state={version:1,completed:[],unlocked:1};
+      try{
+        const saved=JSON.parse(storage.getItem(CAMPAIGN_KEY)||'null');
+        if(Array.isArray(saved?.completed)){
+          state.completed=[...new Set(saved.completed.filter(n=>n===1||n===2))];
+        }
+        for(const level of [1,2]){
+          if(Number(storage.getItem('wheelie-level-'+level+'-best-stars')||0)>0&&
+            !state.completed.includes(level))state.completed.push(level);
+        }
+        if(state.completed.includes(2)&&!state.completed.includes(1))state.completed.push(1);
+        state.completed.sort((a,b)=>a-b);
+        state.unlocked=state.completed.includes(1)||saved?.unlocked===2?2:1;
+      }catch(error){console.warn('No se pudo leer el progreso de niveles',error);}
+      return state;
     }
+    const campaignProgress=loadCampaignProgress(localStorage);
+    function persistCampaign(){
+      try{localStorage.setItem(CAMPAIGN_KEY,JSON.stringify(campaignProgress));}
+      catch(error){console.warn('No se pudo guardar el progreso de niveles',error);}
+    }
+    function markLevelCompleted(level){
+      if(!campaignProgress.completed.includes(level))campaignProgress.completed.push(level);
+      if(level===1||level===2)campaignProgress.unlocked=2;
+      campaignProgress.completed.sort((a,b)=>a-b);
+      persistCampaign();
+    }
+    persistCampaign();
+    function levelUnlocked(level){
+      return level===1||(level===2&&campaignProgress.unlocked>=2);
+    }
+
     function mapObstacles(level){
       const list=dryObstacles.map(({o,z},i)=>({kind:o.kind,z:level===2?wetObstacleZ[i]:z}));
       if(level===2)list.push({kind:wetExtraObstacle.kind,z:wetExtraObstacle.baseZ});
@@ -4010,7 +4043,7 @@
       if(level===currentLevel&&(mapFromPause||active||crashKind)){
         return Math.max(0,Math.min(LEVELS[level].length,distance));
       }
-      return 0;
+      return campaignProgress.completed.includes(level)?LEVELS[level].length:0;
     }
     function renderLevelMap(){
       const cfg=LEVELS[mapSelected],unlocked=levelUnlocked(mapSelected);
@@ -4023,7 +4056,7 @@
         node.setAttribute('aria-pressed',String(n===mapSelected));
         node.querySelector('.nodeStars').textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
         node.querySelector('.nodeStatus').textContent=mapFromPause&&n===currentLevel?'● EN PARTIDA':
-          stars?'✓ COMPLETADO':available?'DISPONIBLE':'🔒 BLOQUEADO';
+          campaignProgress.completed.includes(n)?'✓ COMPLETADO':available?'DISPONIBLE':'🔒 BLOQUEADO';
       }
       document.getElementById('mapTrackTitle').textContent='NIVEL '+mapSelected+
         (cfg.wet?' · LLUVIA':' · SOLEADO');
@@ -4064,13 +4097,13 @@
       mapPlay.textContent=unlocked?'JUGAR NIVEL '+mapSelected:'🔒 COMPLETA NIVEL 1';
       document.getElementById('mapNote').textContent=mapFromPause?
         'Partida en pausa. Puedes revisar ambos niveles sin perder tu progreso.':
-        unlocked?'Selecciona un nivel para comenzar. Las estrellas se guardan en este dispositivo.':
+        unlocked?'Selecciona un nivel para comenzar. Tu progreso y estrellas quedan guardados en este dispositivo.':
         'Termina el nivel 1 para desbloquear el recorrido bajo la lluvia.';
     }
     function openLevelMap(fromPause){
       if(!initialSceneReady||(fromPause&&(!active||!paused))||(!fromPause&&active))return;
       mapFromPause=fromPause;
-      mapSelected=currentLevel;
+      mapSelected=fromPause||crashKind?currentLevel:campaignProgress.unlocked;
       mapPreviousFocus=document.activeElement;
       clearThumbControls();
       mapPanel.hidden=false;
@@ -4106,7 +4139,7 @@
     });
 
     function reset(level=currentLevel) {
-      if(!initialSceneReady)return;
+      if(!initialSceneReady||!levelUnlocked(level))return;
       closeLevelMap();
       nextLevelCountdown=0;
       chooseLevel(level);
@@ -4180,7 +4213,14 @@
       if(active||crashKind!=='level')return;
       reset(currentLevel===1?2:currentLevel);
     }
-    startBtn.addEventListener('click',()=>{unlockCoinAudio();reset();});
+    startBtn.addEventListener('click',()=>{
+      if(active||!initialSceneReady)return;
+      unlockCoinAudio();
+      // En una nueva visita, COMENZAR abre el selector si ya hay
+      // progreso; REINTENTAR siempre repite el nivel de la caída.
+      if(!crashKind&&levelUnlocked(2)){openLevelMap(false);return;}
+      reset();
+    });
     levelRetryBtn.addEventListener('click',()=>{
       unlockCoinAudio();advanceLevel();
     });
@@ -4221,6 +4261,8 @@
       startBtn.textContent = 'REINTENTAR';
       startBtn.hidden = false;
       if(reason==='level'){
+        // Guardar al cruzar la meta, antes de la transición automática.
+        markLevelCompleted(currentLevel);
         const stars=starsForCoins(coinCount);
         const starKey='wheelie-level-'+currentLevel+'-best-stars';
         const bestStars=Math.max(stars,Number(localStorage.getItem(starKey)||0));
@@ -4237,7 +4279,7 @@
           '¡Perfecto! Recogiste todas las chapitas. Mejor nivel: 3 estrellas.' :
           'Mejor resultado: '+bestStars+
           ' estrellas. Para conseguir 3 necesitas todas las chapitas.';
-        if(currentLevel===1)resultsHintEl.textContent+=' Nivel 2: lluvia. Comienza automáticamente en 3 segundos.';
+        if(currentLevel===1)resultsHintEl.textContent+=' Nivel 2 desbloqueado y guardado. Comienza automáticamente en 3 segundos.';
         else resultsHintEl.textContent+=' ¡Completaste los dos niveles!';
         messageEl.textContent='';
         document.body.classList.add('level-complete');
@@ -4579,7 +4621,7 @@
         initialSceneReady=true;
         startBtn.disabled=false;
         menuMap.hidden=false;
-        startBtn.textContent='COMENZAR';
+        startBtn.textContent=levelUnlocked(2)?'ESCOGER NIVEL':'COMENZAR';
         overlay.hidden=true;
         last=performance.now();
       }catch(error){
