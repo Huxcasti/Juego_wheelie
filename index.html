@@ -2880,7 +2880,9 @@
           if(car.variantIndex!==variant)installPassengerVariant(car,variant);
         }
         car.ahead=ahead;
+        car.rivalBlocked=false;
         car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
+        car.actualSpeed=car.speed;
         assignTrafficLane(car,trafficPassNumber++,0);
         car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=car.modelReady===true;
@@ -2888,19 +2890,76 @@
         ahead+=TRAFFIC_GAP+Math.random()*40;
       }
     }
+    // Barrido de cajas en el plano XZ: detectar contacto durante todo
+    // el desplazamiento, no solamente en la posición final del fotograma.
+    function rivalTrafficExtents(car){
+      const cw=car.collisionHalfWidth??(car.isBus?1.325:car.isTruck?1.25:1);
+      const cl=car.collisionHalfLength??(car.isBus?3:car.isTruck?2.75:1.9);
+      // Envolvente conservadora incluso con el giro visual del vehículo,
+      // el manubrio, el piloto y la inclinación del FourTrax.
+      return {x:cw+cl*.215+playerHalfWidth+playerHalfLength*.15+.12,
+        z:cl+cw*.215+playerHalfLength+playerHalfWidth*.15+.24};
+    }
+    function sweepTrafficBox(x0,z0,x1,z1,cx,cz,hx,hz){
+      let enter=0,exit=1;
+      for(const [start,end,center,half] of [[x0,x1,cx,hx],[z0,z1,cz,hz]]){
+        const p=start-center,d=end-start;
+        if(Math.abs(d)<1e-8){
+          if(Math.abs(p)>=half)return 1;
+          continue;
+        }
+        const a=(-half-p)/d,b=(half-p)/d;
+        enter=Math.max(enter,Math.min(a,b));
+        exit=Math.min(exit,Math.max(a,b));
+        if(enter>=exit)return 1;
+      }
+      if(exit<=0||enter>=1)return 1;
+      // Una separación pequeña evita penetración por redondeo y permite
+      // deslizarse lateralmente junto al vehículo que está detenido.
+      const distance=Math.hypot(x1-x0,z1-z0);
+      return Math.max(0,enter-.025/Math.max(.025,distance));
+    }
+    function moveRivalWithoutTraffic(x,z,targetX,targetZ){
+      let fraction=1;
+      // Resolver lateral y longitudinal por separado para poder salir
+      // hacia un carril libre aunque el paso de frente esté bloqueado.
+      for(const car of oncomingCars){
+        if(!car.modelReady)continue;
+        const h=rivalTrafficExtents(car),p=car.group.position;
+        fraction=Math.min(fraction,sweepTrafficBox(x,z,targetX,z,p.x,p.z,h.x,h.z));
+      }
+      const nextX=x+(targetX-x)*fraction;
+      let forwardFraction=1;
+      for(const car of oncomingCars){
+        if(!car.modelReady)continue;
+        const h=rivalTrafficExtents(car),p=car.group.position;
+        forwardFraction=Math.min(forwardFraction,
+          sweepTrafficBox(nextX,z,nextX,targetZ,p.x,p.z,h.x,h.z));
+      }
+      return {x:nextX,z:z+(targetZ-z)*forwardFraction,
+        lateralBlocked:fraction<.999,forwardBlocked:forwardFraction<.999};
+    }
+
     function updateOncomingTraffic(dt){
       let nearest=Infinity,nearestCar=null;
       const ordered=oncomingCars.filter(c=>c.modelReady).sort((a,b)=>a.ahead-b.ahead);
       let leadingAhead=-Infinity;
       for(const car of ordered){
         const oldAhead=car.ahead;
+        const oldX=car.group.position.x,oldZ=car.group.position.z;
+        car.rivalBlocked=false;
         // Los autos viajan en la misma dirección: no atravesarse unos
         // a otros cuando coinciden en un cambio de carril.
         car.ahead=Math.min(oldAhead-speed*dt,
           Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+TRAFFIC_GAP));
-        const actualSpeed=Math.max(0,(oldAhead-car.ahead)/Math.max(.001,dt)-speed);
-        leadingAhead=car.ahead;
-        if(car.ahead < -Math.max(16,car.collisionHalfLength||2)){
+        let recycled=false;
+        const behindPlayer=car.ahead < -Math.max(16,car.collisionHalfLength||2);
+        // No reciclar un carro que todavía puede encontrarse con el bot.
+        const behindBot=rider.position.z-car.ahead>
+          rival.group.position.z+rivalTrafficExtents(car).z+2;
+        if(behindPlayer&&behindBot){
+          recycled=true;
+          leadingAhead=car.ahead;
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
           car.ahead=farthest+TRAFFIC_GAP+Math.random()*40;
           car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
@@ -2914,7 +2973,22 @@
         }
         const previousLane=car.lane;
         car.lane=trafficLaneAt(car,car.ahead,distance+car.ahead);
-        car.group.position.set(car.lane,0,rider.position.z-car.ahead);
+        let newZ=rider.position.z-car.ahead;
+        if(!recycled&&active){
+          const bot=rival.group.position,h=rivalTrafficExtents(car);
+          const fraction=sweepTrafficBox(oldX,oldZ,car.lane,newZ,
+            bot.x,bot.z,h.x,h.z);
+          if(fraction<1){
+            car.lane=oldX+(car.lane-oldX)*fraction;
+            newZ=oldZ+(newZ-oldZ)*fraction;
+            car.ahead=rider.position.z-newZ;
+            car.rivalBlocked=true;
+          }
+        }
+        if(!recycled)leadingAhead=car.ahead;
+        const actualSpeed=recycled?car.speed:Math.max(0,(newZ-oldZ)/Math.max(.001,dt));
+        car.actualSpeed=actualSpeed;
+        car.group.position.set(car.lane,0,newZ);
         // Pequeño giro visual coherente con el desplazamiento lateral.
         const heading=Math.atan2(car.lane-previousLane,Math.max(.001,actualSpeed*dt));
         car.group.rotation.y=THREE.MathUtils.damp(car.group.rotation.y,
@@ -3090,7 +3164,7 @@
     // utiliza el jugador; el bot las predice hasta cuatro segundos antes.
     const rivalAI={
       lane:3.2,sideVelocity:0,planTimer:0,holdTimer:0,
-      steering:0,forwardOffset:6.1
+      steering:0,forwardOffset:6.1,travelSpeed:0,blocked:false
     };
     const rivalCandidateLanes=[-4.15,-2.9,-1.4,0,1.4,2.9,4.15];
     function resetRivalAI(){
@@ -3099,6 +3173,8 @@
       rivalAI.planTimer=0;
       rivalAI.holdTimer=0;
       rivalAI.steering=0;
+      rivalAI.travelSpeed=0;
+      rivalAI.blocked=false;
       rival.group.position.set(3.2,0,-rivalAI.forwardOffset);
       rival.group.rotation.set(0,0,0);
       rival.bike.rotation.set(0,0,0);
@@ -3109,7 +3185,7 @@
       }
     }
     function rivalLaneRisk(laneX,fromX,botZ){
-      const laneChangeTime=Math.abs(laneX-fromX)/4.1+.15;
+      const laneChangeTime=Math.abs(laneX-fromX)/4.8+.12;
       const atTime=t=>{
         const travel=THREE.MathUtils.smoothstep(t,0,laneChangeTime);
         return THREE.MathUtils.lerp(fromX,laneX,travel);
@@ -3119,22 +3195,28 @@
       for(const car of oncomingCars){
         if(!car.modelReady)continue;
         const ahead=botZ-car.group.position.z;
-        if(ahead < -4 || ahead > 125)continue;
-        const relativeSpeed=Math.max(5,speed)+car.speed;
-        const encounter=Math.max(0,ahead-
-          ((car.collisionHalfLength||1.5)+playerHalfLength))/relativeSpeed;
-        if(encounter>4.3)continue;
-        const predicted=atTime(encounter);
-        const futureLane=trafficLaneAt(car,car.ahead-encounter*relativeSpeed,
-          distance+car.ahead-encounter*car.speed);
-        const clearance=Math.abs(predicted-futureLane);
-        const safeWidth=(car.collisionHalfWidth ??
-          (car.isBus?1.325:car.isTruck?1.25:1.0))+playerHalfWidth+.12;
-        // Penalización alta por colisión prevista en el momento del cruce.
-        if(clearance<safeWidth){
-          risk+=1100+(4.3-encounter)*110;
-        }else if(clearance<safeWidth+.35){
-          risk+=(safeWidth+.35-clearance)*85;
+        const h=rivalTrafficExtents(car);
+        if(ahead < -h.z-2 || ahead > 145)continue;
+        const botSpeed=Math.max(5,speed,rivalAI.travelSpeed);
+        const carSpeed=car.rivalBlocked?0:Math.max(0,car.actualSpeed??car.speed);
+        const relativeSpeed=botSpeed+carSpeed;
+        const encounter=Math.max(0,ahead-h.z)/relativeSpeed;
+        if(encounter>5.0)continue;
+        // Comprobar entrada, centro y salida del cruce, no un punto solo.
+        // Si ya está frenado, elegir un carril que permita desbloquearlo.
+        const exitTime=Math.max(encounter,(ahead+h.z)/relativeSpeed);
+        for(const t of [encounter,(encounter+exitTime)*.5,exitTime]){
+          const predicted=atTime(t);
+          const futureLane=car.rivalBlocked?car.lane:
+            trafficLaneAt(car,car.ahead-t*(Math.max(0,speed)+carSpeed),
+              distance+car.ahead-t*carSpeed);
+          const clearance=Math.abs(predicted-futureLane);
+          if(clearance<h.x+.18)risk+=420+(5-Math.min(5,t))*42;
+          else if(clearance<h.x+.65)risk+=(h.x+.65-clearance)*95;
+        }
+        if(car.rivalBlocked&&Math.abs(ahead)<h.z+2){
+          // Prioridad al carril final libre para no quedarse frente a frente.
+          if(Math.abs(laneX-car.lane)<h.x+.25)risk+=2200;
         }
       }
       // Los conos sí ocupan carriles completos, pero no toda la carretera.
@@ -3156,19 +3238,16 @@
     }
     function updateRival(dt){
       rivalClock+=dt;
-      const botZ=rider.position.z-rivalAI.forwardOffset;
+      const targetBotZ=rider.position.z-rivalAI.forwardOffset;
       if(!active){
-        // En el menú el rival espera en su carril; evita movimientos
-        // aleatorios que antes lo ponían delante de los coches.
-        rival.group.position.set(3.2,0,botZ);
-        rival.group.rotation.set(0,0,0);
-        rival.bike.rotation.set(.025,0,0);
+        // Tras terminar no teletransportar el bot a través de un carro.
         return;
       }
+      let botZ=rival.group.position.z;
       rivalAI.holdTimer=Math.max(0,rivalAI.holdTimer-dt);
       rivalAI.planTimer-=dt;
       if(rivalAI.planTimer<=0){
-        rivalAI.planTimer=.12;
+        rivalAI.planTimer=.09;
         const x=rival.group.position.x;
         const currentRisk=rivalLaneRisk(rivalAI.lane,x,botZ);
         let bestLane=rivalAI.lane;
@@ -3182,7 +3261,7 @@
           if(score<bestScore){bestScore=score;bestLane=lane;}
         }
         const bestDanger=rivalLaneRisk(bestLane,x,botZ);
-        const urgent=currentRisk>250;
+        const urgent=currentRisk>250||rivalAI.blocked;
         if(bestLane!==rivalAI.lane && (rivalAI.holdTimer<=0||urgent) &&
           (urgent || bestDanger<currentRisk+.01)){
           rivalAI.lane=bestLane;
@@ -3192,17 +3271,26 @@
       // Cambios de carril con aceleración y dirección progresivas.
       const x=rival.group.position.x;
       const targetVelocity=THREE.MathUtils.clamp(
-        (rivalAI.lane-x)*3.3,-4.8,4.8
+        (rivalAI.lane-x)*3.8,-5.8,5.8
       );
       rivalAI.sideVelocity=THREE.MathUtils.damp(
-        rivalAI.sideVelocity,targetVelocity,8,dt
+        rivalAI.sideVelocity,targetVelocity,11,dt
       );
-      rival.group.position.x=THREE.MathUtils.clamp(
-        x+rivalAI.sideVelocity*dt,-4.25,4.25
-      );
-      rival.group.position.z=botZ-Math.sin(rivalClock*.8)*.18;
+      const wantedX=THREE.MathUtils.clamp(x+rivalAI.sideVelocity*dt,-4.25,4.25);
+      // El bot puede frenar y recuperar su distancia de carrera después,
+      // en vez de estar obligado a avanzar con el jugador.
+      const wantedZ=botZ+THREE.MathUtils.clamp(targetBotZ-botZ,
+        -(Math.max(0,speed)+7)*dt,4*dt);
+      const movement=moveRivalWithoutTraffic(x,botZ,wantedX,wantedZ);
+      rival.group.position.x=movement.x;
+      rival.group.position.z=movement.z;
+      rivalAI.travelSpeed=Math.max(0,(botZ-movement.z)/Math.max(.001,dt));
+      rivalAI.blocked=movement.forwardBlocked||movement.lateralBlocked;
+      if(movement.lateralBlocked)rivalAI.sideVelocity=0;
+      if(rivalAI.blocked){rivalAI.planTimer=0;rivalAI.holdTimer=0;}
+      botZ=movement.z;
       rivalAI.steering=THREE.MathUtils.damp(
-        rivalAI.steering,rivalAI.sideVelocity/4.8,6,dt
+        rivalAI.steering,rivalAI.sideVelocity/5.8,6,dt
       );
       rival.group.rotation.y=THREE.MathUtils.damp(
         rival.group.rotation.y,-rivalAI.steering*.14,7,dt
@@ -3251,8 +3339,8 @@
       }
       const stableLane=Math.abs(rivalAI.sideVelocity)<.8 &&
         Math.abs(rivalAI.lane-rival.group.position.x)<.55;
-      const safeWheelie=active && speed>6 && !approachingBump &&
-        !nearbyDanger && stableLane;
+      const safeWheelie=active && rivalAI.travelSpeed>6 && !approachingBump &&
+        !nearbyDanger && !rivalAI.blocked && stableLane;
       const liftCycle=Math.max(0,Math.sin(rivalClock*1.12-1));
       const desiredWheelie=safeWheelie?
         .13+liftCycle*.76:0;
@@ -3267,7 +3355,7 @@
         rival.bike.rotation.z,-rivalAI.steering*.03,6,dt
       );
       const tireSpeed=approachingBump?.72:1;
-      rival.wheelSpin-=dt*Math.max(speed,5)*tireSpeed/(.43*ATV_SCALE);
+      rival.wheelSpin-=dt*rivalAI.travelSpeed*tireSpeed/(.43*ATV_SCALE);
       for(const wheel of rival.wheels){
         wheel.rotation.x=rival.wheelSpin;
         wheel.rotation.y=rival.frontWheels.includes(wheel)?
