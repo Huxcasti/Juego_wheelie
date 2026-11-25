@@ -3365,22 +3365,43 @@
         passengerType:'Police',variantIndex:-1,isPolice:true,modelReady:true});
     }
 
+    const previousFirstVehicle = new Map();
+
     function resetOncomingCars(){
       trafficPassNumber=0;
       passengerVariantBag=[];
       // Cambiar el orden real de los 12 vehículos, incluso el autobús y
       // la camioneta. Se conservan los modelos cargados y sus dimensiones.
       const ordered=shuffleTraffic(oncomingCars);
-      // Only one police car in level 3; put it among the first three encounters.
-      const policeSlot=currentLevel===3&&policeTemplate?
-        (ordered.slice(0,3).find(c=>c.isPackPlaceholder)||ordered.find(c=>c.isPackPlaceholder)):null;
+      const policeCandidates=ordered.slice(0,3).filter(car=>car.isPackPlaceholder);
+      const policeSlot=currentLevel===3&&policeTemplate
+        ? policeCandidates[Math.floor(Math.random()*policeCandidates.length)]
+        : null;
+      const lineup=ordered.map(car=>{
+        const police=car===policeSlot;
+        const variant=!police&&loadedPassengerPack&&car.isPackPlaceholder
+          ? nextRandomPassengerVariant()
+          : null;
+        const model=police?'police':car.isBus?'bus':car.isTruck?'truck':variant;
+        return {car,police,variant,model};
+      });
+
+      // Cambiar siempre el primer modelo al reintentar un nivel.
+      // Limitar el intercambio a los tres primeros para mantener cerca la patrulla.
+      if(loadedPassengerPack){
+        if(lineup[0].model===previousFirstVehicle.get(currentLevel)){
+          const index=Math.random()<.5?1:2;
+          [lineup[0],lineup[index]]=[lineup[index],lineup[0]];
+        }
+        previousFirstVehicle.set(currentLevel,lineup[0].model);
+      }
+
       let ahead=levelConfig.firstCar+Math.random()*45;
-      for(const car of ordered){
-        if(car===policeSlot){
+      for(const {car,police,variant} of lineup){
+        if(police){
           if(!car.isPolice)installLevel3Police(car);
-        }else if(loadedPassengerPack&&car.isPackPlaceholder){
-          const variant=nextRandomPassengerVariant();
-          if(car.isPolice||car.variantIndex!==variant)installPassengerVariant(car,variant);
+        }else if(variant!==null&&(car.isPolice||car.variantIndex!==variant)){
+          installPassengerVariant(car,variant);
         }
         car.ahead=ahead;
         car.rivalBlocked=false;
