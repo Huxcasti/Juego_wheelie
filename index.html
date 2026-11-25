@@ -358,6 +358,10 @@
       #raceStatus #roadAlert{padding:6px 7px}
       #raceStatus #levelProgress{padding:6px 7px}
     }
+    #restartCampaign{display:block;margin:9px auto 0;border:1px solid #9bd4e4;border-radius:12px;
+      padding:9px 18px;background:#10273c;color:#fff;font-weight:900;touch-action:manipulation}
+    #restartCampaign[hidden]{display:none}
+    #levelRetry{min-width:180px;touch-action:manipulation}
 </style>
 </head>
 <body>
@@ -380,7 +384,7 @@
     <div id="roadAlert" role="status" aria-live="off"></div>
     <div id="raceCounters">
       <div id="coinBadge" aria-live="polite">🟡 <span id="coinCount">0</span><span id="coinGoal">/96</span></div>
-      <div id="levelProgress" aria-live="off">MAPA 1 · 0 / 1200 m</div>
+      <div id="levelProgress" aria-live="off">NIVEL 1 · 0 / 1200 m</div>
     </div>
   </div>
   <div id="trafficLoadError" hidden role="status" style="position:fixed;top:31%;left:50%;transform:translateX(-50%);z-index:50;max-width:90vw;padding:10px 14px;background:#402620e9;border:1px solid #ffba85;border-radius:12px;color:#fff;font-weight:800;text-align:center;pointer-events:none"></div>
@@ -401,6 +405,7 @@
       <p id="levelCoinResult">0 / 96 chapitas</p>
       <p id="levelResultHint">Recoge todas las chapitas para conseguir 3 estrellas.</p>
       <button id="levelRetry" type="button">JUGAR OTRA VEZ</button>
+      <button id="restartCampaign" type="button" hidden>VOLVER AL NIVEL 1</button>
     </div>
   </section>
 
@@ -1491,13 +1496,20 @@
     // Mapa 1 ampliado a 1.2 km. Meta real y 96 chapitas repartidas
     // uniformemente por todo el recorrido; 3 estrellas requieren todas.
     // Mantener un espacio libre entre la última chapita y la meta.
-    const LEVEL_LENGTH = 1200;
-    const LEVEL_FIRST_COIN = 24;
-    const LEVEL_LAST_COIN = 1164;
-    const LEVEL_COIN_SPACING = 12;
-    const LEVEL_TOTAL_COINS = Math.floor(
-      (LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING
-    )+1;
+    const LEVELS=Object.freeze({
+      1:{length:1200,lastCoin:1164,gap:66,minCarSpeed:8,maxCarSpeed:14,firstCar:120,laneChangeChance:.40,wet:false},
+      2:{length:1500,lastCoin:1464,gap:57,minCarSpeed:9,maxCarSpeed:16,firstCar:105,laneChangeChance:.50,wet:true}
+    });
+    let currentLevel=1,levelConfig=LEVELS[1];
+    let LEVEL_LENGTH=1200,LEVEL_LAST_COIN=1164;
+    const LEVEL_FIRST_COIN=24,LEVEL_COIN_SPACING=12;
+    let LEVEL_TOTAL_COINS=96,nextLevelCountdown=0;
+    function chooseLevel(number){
+      if(!LEVELS[number])throw Error('Nivel no disponible');
+      currentLevel=number;levelConfig=LEVELS[number];
+      LEVEL_LENGTH=levelConfig.length;LEVEL_LAST_COIN=levelConfig.lastCoin;
+      LEVEL_TOTAL_COINS=Math.floor((LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)+1;
+    }
     const warnEl = document.getElementById('roadAlert');
     // Safari puede cambiar el tamaño del HUD con la orientación y el
     // texto de puntuación: medirlo evita depender de coordenadas fijas.
@@ -1566,6 +1578,24 @@
     addCones(-192,1);
     addHump(-232,'badén',.28,3.5);
     addHump(-282,'reductor',.22,1.7);
+    const dryObstacles=obstacles.map(o=>({o,z:o.baseZ,x:o.group.position.x}));
+    const wetObstacleZ=[-32,-74,-118,-152,-196,-236,-294];
+    addCones(-266,-1);
+    const wetExtraObstacle=obstacles.pop();
+    wetExtraObstacle.group.visible=false;
+    function configureLevelObstacles(){
+      obstacles.length=0;
+      for(let i=0;i<dryObstacles.length;i++){
+        const {o,z,x}=dryObstacles[i];
+        o.baseZ=levelConfig.wet?wetObstacleZ[i]:z;
+        o.group.position.x=levelConfig.wet&&o.kind==='conos'?-x:x;
+        o.hit=false;o.group.visible=true;obstacles.push(o);
+      }
+      wetExtraObstacle.group.visible=levelConfig.wet;
+      wetExtraObstacle.hit=false;
+      if(levelConfig.wet)obstacles.push(wetExtraObstacle);
+      positionObstacles(0);
+    }
 
     // Meta visible, fuera de la carretera salvo la franja cuadriculada.
     const finishGate=new THREE.Group();
@@ -2669,9 +2699,9 @@
     const COIN_PICKUP_LENGTH=3.2;
     const COIN_MAX_LANE=1.35;
     const COIN_CLEARANCE=.62;
-    const TRAFFIC_GAP=66;
-    const TRAFFIC_MIN_SPEED=8;
-    const TRAFFIC_MAX_SPEED=14;
+    function randomTrafficSpeed(){
+      return levelConfig.minCarSpeed+Math.random()*(levelConfig.maxCarSpeed-levelConfig.minCarSpeed);
+    }
     let trafficPassNumber=0;
     // Nueva distribución en cada intento. Las posiciones son definitivas
     // durante la partida y el tráfico consulta exactamente la misma ruta.
@@ -2770,7 +2800,7 @@
       car.innerLane=coin?.lane??0;
       // Sortear independientemente el comportamiento de cada automóvil.
       const mode=Math.random();
-      if(eligible&&mode<.40){
+      if(eligible&&mode<levelConfig.laneChangeChance){
         // La mayoría va por fuera; algunos todavía cambian de carril.
         car.trafficMode=mode<.15?'hold':mode<.27?'cross':'shift';
         car.nearCoins=true;
@@ -2873,7 +2903,7 @@
       // Cambiar el orden real de los 12 vehículos, incluso el autobús y
       // la camioneta. Se conservan los modelos cargados y sus dimensiones.
       const ordered=shuffleTraffic(oncomingCars);
-      let ahead=120+Math.random()*45;
+      let ahead=levelConfig.firstCar+Math.random()*45;
       for(const car of ordered){
         if(loadedPassengerPack&&car.isPackPlaceholder){
           const variant=nextRandomPassengerVariant();
@@ -2881,13 +2911,13 @@
         }
         car.ahead=ahead;
         car.rivalBlocked=false;
-        car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
+        car.speed=randomTrafficSpeed();
         car.actualSpeed=car.speed;
         assignTrafficLane(car,trafficPassNumber++,0);
         car.group.position.set(car.lane,0,-car.ahead);
         car.group.visible=car.modelReady===true;
         // Distancias distintas sin perder el margen longitudinal mínimo.
-        ahead+=TRAFFIC_GAP+Math.random()*40;
+        ahead+=levelConfig.gap+Math.random()*40;
       }
     }
     // Barrido de cajas en el plano XZ: detectar contacto durante todo
@@ -2951,7 +2981,7 @@
         // Los autos viajan en la misma dirección: no atravesarse unos
         // a otros cuando coinciden en un cambio de carril.
         car.ahead=Math.min(oldAhead-speed*dt,
-          Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+TRAFFIC_GAP));
+          Math.max(oldAhead-(speed+car.speed)*dt,leadingAhead+levelConfig.gap));
         let recycled=false;
         const behindPlayer=car.ahead < -Math.max(16,car.collisionHalfLength||2);
         // No reciclar un carro que todavía puede encontrarse con el bot.
@@ -2961,8 +2991,8 @@
           recycled=true;
           leadingAhead=car.ahead;
           const farthest=Math.max(145,...oncomingCars.map(c=>c.ahead));
-          car.ahead=farthest+TRAFFIC_GAP+Math.random()*40;
-          car.speed=TRAFFIC_MIN_SPEED+Math.random()*(TRAFFIC_MAX_SPEED-TRAFFIC_MIN_SPEED);
+          car.ahead=farthest+levelConfig.gap+Math.random()*40;
+          car.speed=randomTrafficSpeed();
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
           if(loadedPassengerPack && car.isPackPlaceholder){
             const variant=nextRandomPassengerVariant();
@@ -3759,7 +3789,7 @@
       const bucket=Math.floor(distance/5);
       if(bucket===progressBucket)return;
       progressBucket=bucket;
-      mapProgressEl.textContent='MAPA 1 · '+
+      mapProgressEl.textContent='NIVEL '+currentLevel+' · '+
         Math.min(LEVEL_LENGTH,Math.floor(distance))+' / '+LEVEL_LENGTH+' m';
     }
     const timeEl = document.getElementById('time');
@@ -3775,8 +3805,80 @@
     let gasHeldSeconds = 0;
     let crashKind = '';
     let crashFallProgress = 0;
-    function reset() {
+    // Lluvia y charcos decorativos: dos llamadas de dibujo en total.
+    const RAIN_COUNT=640;
+    const rainPositions=new Float32Array(RAIN_COUNT*6);
+    const rainDrops=Array.from({length:RAIN_COUNT},()=>({
+      x:Math.random()*42-21,y:Math.random()*17+.15,z:Math.random()*88-77,v:11+Math.random()*9
+    }));
+    const rainGeometry=new THREE.BufferGeometry();
+    rainGeometry.setAttribute('position',new THREE.BufferAttribute(rainPositions,3).setUsage(THREE.DynamicDrawUsage));
+    const rainLines=new THREE.LineSegments(rainGeometry,new THREE.LineBasicMaterial({
+      color:0xcce8ff,transparent:true,opacity:.53,depthWrite:false,fog:true
+    }));
+    rainLines.frustumCulled=false;rainLines.visible=false;scene.add(rainLines);
+    const wetPuddles=new THREE.InstancedMesh(new THREE.CircleGeometry(1,20),
+      new THREE.MeshStandardMaterial({color:0x344858,roughness:.14,metalness:.18,
+      transparent:true,opacity:.46,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1}),32);
+    wetPuddles.frustumCulled=false;wetPuddles.visible=false;scene.add(wetPuddles);
+    const puddleDummy=new THREE.Object3D();
+    const puddleLayout=Array.from({length:32},(_,i)=>({
+      x:(i%2?1:-1)*(1.2+((i*13)%17)*.19),z:-152+i*9.55,rx:.43+(i%5)*.17,rz:1.15+(i%7)*.23
+    }));
+    function updateWetPuddles(){
+      if(!levelConfig.wet)return;
+      for(let i=0;i<puddleLayout.length;i++){
+        const p=puddleLayout[i],z=((p.z+distance+155)%310+310)%310-155;
+        puddleDummy.position.set(p.x,.007,rider.position.z+z);
+        puddleDummy.rotation.set(-Math.PI/2,0,0);
+        puddleDummy.scale.set(p.rx,p.rz,1);
+        puddleDummy.updateMatrix();wetPuddles.setMatrixAt(i,puddleDummy.matrix);
+      }
+      wetPuddles.instanceMatrix.needsUpdate=true;
+    }
+    function updateRain(dt){
+      if(!levelConfig.wet)return;
+      rainLines.position.set(rider.position.x*.55,0,rider.position.z);
+      for(let i=0;i<RAIN_COUNT;i++){
+        const p=rainDrops[i];
+        p.y-=p.v*dt;p.x+=2.5*dt;p.z+=Math.max(0,speed)*dt;
+        if(p.y<.12||p.z>11||p.x>21){
+          p.y=12+Math.random()*5;p.x=Math.random()*42-21;p.z=Math.random()*88-77;
+        }
+        const j=i*6,len=.48+p.v*.025;
+        rainPositions[j]=p.x;rainPositions[j+1]=p.y;rainPositions[j+2]=p.z;
+        rainPositions[j+3]=p.x-.13;rainPositions[j+4]=p.y+len;rainPositions[j+5]=p.z-.07;
+      }
+      rainGeometry.attributes.position.needsUpdate=true;
+    }
+    function applyLevelWeather(){
+      const wet=levelConfig.wet;
+      scene.background.setHex(wet?0x617887:0x82d6ff);
+      scene.fog.color.setHex(wet?0x758997:0xa8dded);
+      scene.fog.near=wet?32:65;scene.fog.far=wet?132:250;
+      hemi.color.setHex(wet?0xc4d7e8:0xffffff);
+      hemi.groundColor.setHex(wet?0x445748:0x587257);
+      hemi.intensity=wet?1.65:2.2;
+      sun.color.setHex(wet?0xc0d3e8:0xffffff);
+      sun.intensity=wet?.85:2.2;
+      renderer.toneMappingExposure=wet?1.24:1.4;
+      roadMat.color.setHex(wet?0x303b46:0x525a61);
+      roadMat.roughness=wet?.27:.96;
+      groundMat.color.setHex(wet?0x467f40:0x5eae53);
+      shoulderMat.color.setHex(wet?0x795641:0xba7a4b);
+      for(const cloud of cloudSlots)cloud.visible=!wet;
+      rainLines.visible=wet;wetPuddles.visible=wet;
+      document.body.classList.toggle('rain-level',wet);
+    }
+
+    function reset(level=currentLevel) {
       if(!initialSceneReady)return;
+      nextLevelCountdown=0;
+      chooseLevel(level);
+      configureLevelObstacles();
+      finishGate.position.z=-LEVEL_LENGTH;
+      applyLevelWeather();
+      coinGoalEl.textContent='/'+LEVEL_TOTAL_COINS;
       clearThumbControls();
       document.body.classList.remove('level-complete');
       document.body.classList.add('playing');
@@ -3825,8 +3927,10 @@
       // primera imagen del nuevo intento, incluso si aún no aceleró.
       updateRoadWrap();
       updateLevelProgress();
+      updateRain(0);
+      timeEl.textContent='0.00 s';angleEl.textContent='0°';
       last=performance.now();
-      messageEl.textContent = '¡ACELERA!';
+      messageEl.textContent = levelConfig.wet?'¡NIVEL 2 · LLUVIA!':'¡ACELERA!';
       startBtn.hidden = true;
     }
     document.getElementById('pauseRetry').addEventListener('click',()=>{
@@ -3834,10 +3938,27 @@
       unlockCoinAudio();
       reset();
     });
+    const levelRetryBtn=document.getElementById('levelRetry');
+    const campaignBtn=document.getElementById('restartCampaign');
+    const levelTitleEl=document.getElementById('levelResultTitle');
+    function advanceLevel(){
+      if(active||crashKind!=='level')return;
+      reset(currentLevel===1?2:currentLevel);
+    }
     startBtn.addEventListener('click',()=>{unlockCoinAudio();reset();});
-    document.getElementById('levelRetry').addEventListener('click',()=>{
-      unlockCoinAudio();reset();
+    levelRetryBtn.addEventListener('click',()=>{
+      unlockCoinAudio();advanceLevel();
     });
+    campaignBtn.addEventListener('click',()=>{
+      if(active||crashKind!=='level')return;
+      unlockCoinAudio();reset(1);
+    });
+    function updateLevelTransition(dt){
+      if(active||crashKind!=='level'||currentLevel!==1||nextLevelCountdown<=0)return;
+      nextLevelCountdown=Math.max(0,nextLevelCountdown-dt);
+      if(nextLevelCountdown===0){advanceLevel();return;}
+      levelRetryBtn.textContent='NIVEL 2 EN '+Math.ceil(nextLevelCountdown)+' s';
+    }
 
     function finish(reason = 'normal') {
       if (!active) return;
@@ -3866,9 +3987,13 @@
       startBtn.hidden = false;
       if(reason==='level'){
         const stars=starsForCoins(coinCount);
-        const bestStars=Math.max(stars,
-          Number(localStorage.getItem('wheelie-level-1-best-stars')||0));
-        localStorage.setItem('wheelie-level-1-best-stars',String(bestStars));
+        const starKey='wheelie-level-'+currentLevel+'-best-stars';
+        const bestStars=Math.max(stars,Number(localStorage.getItem(starKey)||0));
+        localStorage.setItem(starKey,String(bestStars));
+        levelTitleEl.textContent='¡NIVEL '+currentLevel+' COMPLETADO!';
+        campaignBtn.hidden=currentLevel===1;
+        nextLevelCountdown=currentLevel===1?3:0;
+        levelRetryBtn.textContent=currentLevel===1?'NIVEL 2 EN 3 s':'REPETIR NIVEL 2';
         resultsStarsEl.textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
         resultsStarsEl.setAttribute('aria-label',stars+' de 3 estrellas');
         resultsCoinsEl.textContent='🟡 '+coinCount+' / '+LEVEL_TOTAL_COINS+' chapitas';
@@ -3876,6 +4001,8 @@
           '¡Perfecto! Recogiste todas las chapitas. Mejor nivel: 3 estrellas.' :
           'Mejor resultado: '+bestStars+
           ' estrellas. Para conseguir 3 necesitas todas las chapitas.';
+        if(currentLevel===1)resultsHintEl.textContent+=' Sigue el nivel de lluvia.';
+        else resultsHintEl.textContent+=' ¡Completaste los dos niveles!';
         messageEl.textContent='';
         document.body.classList.add('level-complete');
         startBtn.hidden=true;
@@ -3906,6 +4033,7 @@
       updateExtraGrass();
       updateMeadowGrass();
       updateGrassFill();
+      updateWetPuddles();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
@@ -3982,7 +4110,7 @@
       if(!initialSceneReady)return;
 
       if (active && !paused) {
-        speed = Math.max(0, Math.min(22, speed + (keys.gas ? 8 : -5.4) * dt));
+        speed = Math.max(0, Math.min(22, speed + (keys.gas ? (levelConfig.wet?7.5:8) : (levelConfig.wet?-4.7:-5.4)) * dt));
         distance = Math.min(LEVEL_LENGTH,distance+speed*dt);
         updateLevelProgress();
         const targetSteer=THREE.MathUtils.clamp(steerValue+keyboardSteer,-1,1);
@@ -3990,12 +4118,12 @@
         // La dirección necesita velocidad hacia delante para desplazar
         // el vehículo: transición gradual a baja velocidad y cero real
         // al detenerse (también cancela inercia lateral residual).
-        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,13,dt);
+        lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,levelConfig.wet?10:13,dt);
         const rollingSpeed=speed>.20?speed:0;
         const traction=THREE.MathUtils.clamp(rollingSpeed/2.8,0,1);
         const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction;
         steerVelocity=rollingSpeed===0?0:
-          THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,16,dt);
+          THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,levelConfig.wet?10:16,dt);
         if(rollingSpeed>0){
           rider.position.x=THREE.MathUtils.clamp(
             rider.position.x+steerVelocity*dt,-4.6,4.6
@@ -4120,7 +4248,9 @@
         rider.position.z-7.2
       );
       updateClouds(paused?0:dt);
-      updateTreeWind(paused?0:dt);
+      updateTreeWind(paused?0:dt*(levelConfig.wet?1.45:1));
+      updateRain(paused||!active?0:dt);
+      updateLevelTransition(dt);
       renderer.render(scene,camera);
     }
 
