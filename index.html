@@ -485,7 +485,7 @@
         <div id="mapLegend"><span>🟢 Tú / inicio</span><span>▲ Conos</span><span>▰ Reductor</span><span>◆ Badén</span><span>◢ Rampa</span><span>🏁 Meta</span></div>
       </div>
       <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
-      <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Semáforos: <a href="https://sketchfab.com/3d-models/traffic-light-semaforo-1e120134a77944929519d8f96a5f3998" target="_blank" rel="noopener" style="color:inherit">NEB-ART</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
+      <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Semáforos: <a href="https://sketchfab.com/3d-models/traffic-light-semaforo-1e120134a77944929519d8f96a5f3998" target="_blank" rel="noopener" style="color:inherit">NEB-ART</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Patrulla: <a href="https://sketchfab.com/3d-models/police-car-9166b13b6ae341f4bfc093edb71d74f4" target="_blank" rel="noopener" style="color:inherit">Mateusz Woliński</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
       <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
     </div>
   </section>
@@ -2937,6 +2937,7 @@
       scene.add(model.group);
       Object.assign(car,model);
       car.variantIndex=chosen;
+      car.isPolice=false;
       car.isPackPlaceholder=true;
       car.modelReady=true;
       car.group.visible=true;
@@ -3308,17 +3309,78 @@
       }
     }
 
+    // Level 3: original Crown Victoria by Mateusz Woliński (CC BY 4.0).
+    // Front wheels are at positive Z in this GLB; keep its original orientation.
+    let policeTemplate=null;
+    async function loadLevel3Police(){
+      if(policeTemplate)return;
+      try{
+        if(typeof DecompressionStream!=='function')return;
+        const response=await fetch('./assets/level3-police-car.glb.gz?v=1');
+        if(!response.ok||!response.body)throw new Error('HTTP '+response.status);
+        const bytes=await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        const gltf=await new Promise((resolve,reject)=>loader.parse(bytes,'',resolve,reject));
+        const model=gltf.scene;
+        const mount=new THREE.Group();
+        mount.add(model);
+        mount.updateMatrixWorld(true);
+        const box=new THREE.Box3().setFromObject(mount);
+        const size=box.getSize(new THREE.Vector3());
+        if(!Number.isFinite(size.x)||size.x<.2||size.z<1||size.y<.2)throw new Error('Dimensiones inválidas');
+        const scale=Math.min(2.45/size.x,5.4/size.z);
+        const center=box.getCenter(new THREE.Vector3());
+        model.position.x-=center.x;
+        model.position.y+=.018/scale-box.min.y;
+        model.position.z-=center.z;
+        mount.scale.setScalar(scale);
+        mount.traverse(obj=>{
+          if(!obj.isMesh)return;
+          obj.castShadow=/CrownVic.*Body/i.test(obj.name);
+          obj.receiveShadow=obj.castShadow;
+        });
+        policeTemplate={mount,width:size.x*scale,length:size.z*scale,radius:.40*scale};
+        console.info('Patrulla del nivel 3 cargada');
+      }catch(err){
+        // Optional urban asset: its absence must not stop any level.
+        console.warn('Patrulla del nivel 3 no disponible:',err);
+      }
+    }
+    function installLevel3Police(car){
+      if(!policeTemplate)return;
+      const group=new THREE.Group();
+      group.name='Nivel 3 · Patrulla Crown Victoria';
+      const model=policeTemplate.mount.clone(true);
+      group.add(model);
+      group.position.copy(car.group.position);
+      group.rotation.copy(car.group.rotation);
+      const rolling=[];
+      model.traverse(obj=>{
+        if(obj.isMesh&&/wheel/i.test(obj.name)&&!/brake/i.test(obj.name))rolling.push(obj);
+      });
+      scene.remove(car.group);
+      scene.add(group);
+      Object.assign(car,{group,rolling,wheelRadius:policeTemplate.radius,
+        collisionHalfWidth:policeTemplate.width*.5,
+        collisionHalfLength:policeTemplate.length*.5,
+        passengerType:'Police',variantIndex:-1,isPolice:true,modelReady:true});
+    }
+
     function resetOncomingCars(){
       trafficPassNumber=0;
       passengerVariantBag=[];
       // Cambiar el orden real de los 12 vehículos, incluso el autobús y
       // la camioneta. Se conservan los modelos cargados y sus dimensiones.
       const ordered=shuffleTraffic(oncomingCars);
+      // Only one police car in level 3; put it among the first three encounters.
+      const policeSlot=currentLevel===3&&policeTemplate?
+        (ordered.slice(0,3).find(c=>c.isPackPlaceholder)||ordered.find(c=>c.isPackPlaceholder)):null;
       let ahead=levelConfig.firstCar+Math.random()*45;
       for(const car of ordered){
-        if(loadedPassengerPack&&car.isPackPlaceholder){
+        if(car===policeSlot){
+          if(!car.isPolice)installLevel3Police(car);
+        }else if(loadedPassengerPack&&car.isPackPlaceholder){
           const variant=nextRandomPassengerVariant();
-          if(car.variantIndex!==variant)installPassengerVariant(car,variant);
+          if(car.isPolice||car.variantIndex!==variant)installPassengerVariant(car,variant);
         }
         car.ahead=ahead;
         car.rivalBlocked=false;
@@ -3405,7 +3467,7 @@
           car.ahead=farthest+levelConfig.gap+Math.random()*(levelConfig.extreme?12:40);
           car.speed=randomTrafficSpeed();
           // Mostrar nuevos diseños del paquete al reciclar el tráfico.
-          if(loadedPassengerPack && car.isPackPlaceholder){
+          if(loadedPassengerPack && car.isPackPlaceholder && !car.isPolice){
             const variant=nextRandomPassengerVariant();
             if(car.variantIndex!==variant)installPassengerVariant(car,variant);
           }
@@ -5178,6 +5240,7 @@
         ['Casas',loadRoadsideHouses,()=>houseSlots.every(slot=>slot.children.length>0)],
         ['Edificios del nivel 3',loadLevel3Buildings,()=>true],
         ['Semáforos del nivel 3',loadCitySignals,()=>true],
+        ['Patrulla del nivel 3',loadLevel3Police,()=>true],
         ['Montaña',loadDistantMountain,()=>!!distantMountain],
         ['Nubes',loadClouds,()=>true],
         ['Carros',loadPassengerCarPack,()=>initialTrafficReady],
