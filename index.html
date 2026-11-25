@@ -436,6 +436,9 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+    // Desplazar el decorado completo en el nivel lluvioso, sin separar
+    // las casas de sus claros de vegetación ni duplicar los modelos.
+    let sceneryOffset=0;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x82d6ff);
     scene.fog = new THREE.Fog(0xa8dded, 65, 250);
@@ -1062,7 +1065,7 @@
       if(!roadsideGrass)return;
       for(let i=0;i<grassClumps.length;i++){
         const plant=grassClumps[i];
-        const relative=(((plant.baseZ+distance+155)%310)+310)%310-155;
+        const relative=(((plant.baseZ+distance+sceneryOffset+155)%310)+310)%310-155;
         grassTransform.position.set(
           plant.x,.022,rider.position.z+relative
         );
@@ -1128,7 +1131,7 @@
       for(const batch of extraGrassBatches){
         for(let i=0;i<batch.plants.length;i++){
           const p=batch.plants[i];
-          const relative=(((p.baseZ+distance+155)%310)+310)%310-155;
+          const relative=(((p.baseZ+distance+sceneryOffset+155)%310)+310)%310-155;
           grassTransform.position.set(p.x,ground.position.y+.008,rider.position.z+relative);
           grassTransform.rotation.set(0,p.yaw,0);
           grassTransform.scale.setScalar(p.scale);
@@ -1207,7 +1210,7 @@
       meadowBucket=bucket;
       for(let i=0;i<meadowPlants.length;i++){
         const p=meadowPlants[i];
-        const relative=(((p.baseZ+distance+155)%310)+310)%310-155;
+        const relative=(((p.baseZ+distance+sceneryOffset+155)%310)+310)%310-155;
         grassTransform.position.set(p.x,ground.position.y+.008,rider.position.z+relative);
         grassTransform.rotation.set(0,p.yaw,0);
         grassTransform.scale.setScalar(p.scale);
@@ -1311,7 +1314,7 @@
       for(let i=0;i<grassFillPlants.length;i++){
         const p=grassFillPlants[i];
         grassTransform.position.set(p.x,ground.position.y+.012,
-          rider.position.z+wrapGrassZ(p.baseZ+distance));
+          rider.position.z+wrapGrassZ(p.baseZ+distance+sceneryOffset));
         grassTransform.rotation.set(0,p.yaw,0);
         grassTransform.scale.setScalar(p.scale);
         grassTransform.updateMatrix();
@@ -1507,6 +1510,7 @@
     function chooseLevel(number){
       if(!LEVELS[number])throw Error('Nivel no disponible');
       currentLevel=number;levelConfig=LEVELS[number];
+      sceneryOffset=levelConfig.wet?87:0;
       LEVEL_LENGTH=levelConfig.length;LEVEL_LAST_COIN=levelConfig.lastCoin;
       LEVEL_TOTAL_COINS=Math.floor((LEVEL_LAST_COIN-LEVEL_FIRST_COIN)/LEVEL_COIN_SPACING)+1;
     }
@@ -3789,7 +3793,7 @@
       const bucket=Math.floor(distance/5);
       if(bucket===progressBucket)return;
       progressBucket=bucket;
-      mapProgressEl.textContent='NIVEL '+currentLevel+' · '+
+      mapProgressEl.textContent='NIVEL '+currentLevel+(levelConfig.wet?' · LLUVIA · ':' · ')+
         Math.min(LEVEL_LENGTH,Math.floor(distance))+' / '+LEVEL_LENGTH+' m';
     }
     const timeEl = document.getElementById('time');
@@ -3851,6 +3855,31 @@
       }
       rainGeometry.attributes.position.needsUpdate=true;
     }
+    // Balizas reflectantes exclusivas del segundo recorrido. Comparten
+    // geometría y material; dos llamadas de dibujo para todo el tramo.
+    const rainMarkerCount=32;
+    const rainMarkerPosts=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,.84,.12),
+      new THREE.MeshStandardMaterial({color:0xe4e7e8,roughness:.75}),rainMarkerCount);
+    const rainMarkerReflectors=new THREE.InstancedMesh(new THREE.BoxGeometry(.145,.16,.145),
+      new THREE.MeshBasicMaterial({color:0xffc85c}),rainMarkerCount);
+    for(const mesh of [rainMarkerPosts,rainMarkerReflectors]){
+      mesh.visible=false;mesh.frustumCulled=false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(mesh);
+    }
+    const rainMarkerDummy=new THREE.Object3D();
+    function updateRainRoadMarkers(){
+      if(!levelConfig.wet)return;
+      for(let i=0;i<rainMarkerCount;i++){
+        const side=i%2?1:-1;
+        const z=rider.position.z+wrapGrassZ(-151+Math.floor(i/2)*19.3+side*1.6+distance);
+        rainMarkerDummy.position.set(side*6.55,.42,z);
+        rainMarkerDummy.updateMatrix();rainMarkerPosts.setMatrixAt(i,rainMarkerDummy.matrix);
+        rainMarkerDummy.position.y=.77;
+        rainMarkerDummy.updateMatrix();rainMarkerReflectors.setMatrixAt(i,rainMarkerDummy.matrix);
+      }
+      rainMarkerPosts.instanceMatrix.needsUpdate=true;
+      rainMarkerReflectors.instanceMatrix.needsUpdate=true;
+    }
     function applyLevelWeather(){
       const wet=levelConfig.wet;
       scene.background.setHex(wet?0x617887:0x82d6ff);
@@ -3868,6 +3897,7 @@
       shoulderMat.color.setHex(wet?0x795641:0xba7a4b);
       for(const cloud of cloudSlots)cloud.visible=!wet;
       rainLines.visible=wet;wetPuddles.visible=wet;
+      rainMarkerPosts.visible=wet;rainMarkerReflectors.visible=wet;
       document.body.classList.toggle('rain-level',wet);
     }
 
@@ -3925,7 +3955,7 @@
       camera.updateMatrixWorld(true);
       // Recolocar árboles, farolas, líneas y terreno antes de la
       // primera imagen del nuevo intento, incluso si aún no aceleró.
-      updateRoadWrap();
+      updateRoadWrap(true);
       updateLevelProgress();
       updateRain(0);
       timeEl.textContent='0.00 s';angleEl.textContent='0°';
@@ -3957,7 +3987,7 @@
       if(active||crashKind!=='level'||currentLevel!==1||nextLevelCountdown<=0)return;
       nextLevelCountdown=Math.max(0,nextLevelCountdown-dt);
       if(nextLevelCountdown===0){advanceLevel();return;}
-      levelRetryBtn.textContent='NIVEL 2 EN '+Math.ceil(nextLevelCountdown)+' s';
+      levelRetryBtn.textContent='CONTINUAR · '+Math.ceil(nextLevelCountdown)+' s';
     }
 
     function finish(reason = 'normal') {
@@ -3992,8 +4022,9 @@
         localStorage.setItem(starKey,String(bestStars));
         levelTitleEl.textContent='¡NIVEL '+currentLevel+' COMPLETADO!';
         campaignBtn.hidden=currentLevel===1;
+        progressBucket=-1;updateLevelProgress();
         nextLevelCountdown=currentLevel===1?3:0;
-        levelRetryBtn.textContent=currentLevel===1?'NIVEL 2 EN 3 s':'REPETIR NIVEL 2';
+        levelRetryBtn.textContent=currentLevel===1?'CONTINUAR · 3 s':'REPETIR NIVEL 2';
         resultsStarsEl.textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
         resultsStarsEl.setAttribute('aria-label',stars+' de 3 estrellas');
         resultsCoinsEl.textContent='🟡 '+coinCount+' / '+LEVEL_TOTAL_COINS+' chapitas';
@@ -4001,7 +4032,7 @@
           '¡Perfecto! Recogiste todas las chapitas. Mejor nivel: 3 estrellas.' :
           'Mejor resultado: '+bestStars+
           ' estrellas. Para conseguir 3 necesitas todas las chapitas.';
-        if(currentLevel===1)resultsHintEl.textContent+=' Sigue el nivel de lluvia.';
+        if(currentLevel===1)resultsHintEl.textContent+=' Nivel 2: lluvia. Comienza automáticamente en 3 segundos.';
         else resultsHintEl.textContent+=' ¡Completaste los dos niveles!';
         messageEl.textContent='';
         document.body.classList.add('level-complete');
@@ -4009,7 +4040,7 @@
       }
     }
 
-    function updateRoadWrap() {
+    function updateRoadWrap(force=false) {
       // El relieve es un decorado de horizonte que mantiene su distancia
       // y nunca avanza hacia el vehículo al recorrer los 1,200 metros.
       if(distantMountain){
@@ -4026,14 +4057,15 @@
         stripe.mesh.position.z = rider.position.z + ((((z + distance + 155) % 310) + 310) % 310 - 155);
       }
       for (const group of landscape) {
-        group.position.z = rider.position.z + ((((group.userData.baseZ + distance + 155) % 310) + 310) % 310 - 155);
+        group.position.z = rider.position.z + ((((group.userData.baseZ + distance + sceneryOffset + 155) % 310) + 310) % 310 - 155);
       }
       // El follaje bajo se reutiliza frente a la cámara continuamente.
       updateRoadsideGrass();
-      updateExtraGrass();
-      updateMeadowGrass();
-      updateGrassFill();
+      updateExtraGrass(force);
+      updateMeadowGrass(force);
+      updateGrassFill(force);
       updateWetPuddles();
+      updateRainRoadMarkers();
     }
 
     // Sombras de contacto suaves bajo las gomas, independientes de la
@@ -4121,7 +4153,7 @@
         lateralMotion=THREE.MathUtils.damp(lateralMotion,targetSteer,levelConfig.wet?10:13,dt);
         const rollingSpeed=speed>.20?speed:0;
         const traction=THREE.MathUtils.clamp(rollingSpeed/2.8,0,1);
-        const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction;
+        const desiredSideSpeed=lateralMotion*(3.25+rollingSpeed*.15)*traction*(levelConfig.wet?.90:1);
         steerVelocity=rollingSpeed===0?0:
           THREE.MathUtils.damp(steerVelocity,desiredSideSpeed,levelConfig.wet?10:16,dt);
         if(rollingSpeed>0){
