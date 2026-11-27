@@ -417,6 +417,8 @@
       font:800 11px/1.1 system-ui,sans-serif;white-space:nowrap;cursor:pointer}
     #engineSoundBtn[hidden]{display:none}
     #engineSoundBtn:focus-visible{outline:2px solid #fff}
+  .visualQualityLabel{display:flex;align-items:center;justify-content:center;gap:9px;font:800 12px/1.2 system-ui;color:#e5f3f5;pointer-events:auto;margin:5px 0}
+  .visualQualitySelect{appearance:auto;color:#fff;background:#173448;border:1px solid #8aaab8;border-radius:9px;padding:6px 9px;font:inherit;touch-action:manipulation}
 </style>
 </head>
 <body>
@@ -452,6 +454,7 @@
   <div id="pauseMessage"><span>PAUSA</span>
     <button id="pauseRetry" type="button" aria-label="Repetir nivel desde el principio">REPETIR</button>
     <button id="pauseMap" type="button">🗺 MAPA DE NIVELES</button>
+    <label class="visualQualityLabel">GRÁFICOS · NIVEL 1 <select class="visualQualitySelect" aria-label="Calidad gráfica del nivel 1"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="ultra">Ultra</option></select></label>
   </div>
   <div id="message"></div>
   <button id="start" disabled>COMENZAR</button>
@@ -486,6 +489,7 @@
       </div>
       <div id="mapStats"><span id="mapDistance"></span><span id="mapCoins"></span><span id="mapBest"></span></div>
       <small id="urbanCredit" hidden style="display:block;font-size:10px;color:#b9d2d7;margin-top:6px">Edificios: <a href="https://sketchfab.com/3d-models/buildings-9a09d24934b04a77931d2803847d75a9" target="_blank" rel="noopener" style="color:inherit">Elbolillo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Semáforos: <a href="https://sketchfab.com/3d-models/traffic-light-semaforo-1e120134a77944929519d8f96a5f3998" target="_blank" rel="noopener" style="color:inherit">NEB-ART</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Patrulla: <a href="https://sketchfab.com/3d-models/police-car-9166b13b6ae341f4bfc093edb71d74f4" target="_blank" rel="noopener" style="color:inherit">Mateusz Woliński</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit">CC BY 4.0</a> · Texturas optimizadas y distribución adaptada.</small>
+      <label class="visualQualityLabel">GRÁFICOS · NIVEL 1 <select class="visualQualitySelect" aria-label="Calidad gráfica del nivel 1"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="ultra">Ultra</option></select></label>
       <footer id="mapFooter"><p id="mapNote"></p><button id="mapPlay" type="button">JUGAR NIVEL 1</button></footer>
     </div>
   </section>
@@ -4641,7 +4645,119 @@
       rainMarkerPosts.instanceMatrix.needsUpdate=true;
       rainMarkerReflectors.instanceMatrix.needsUpdate=true;
     }
+
+    // Level 1 visual upgrade: no changes to physics or traffic.
+    const visualPresets={low:[1,512,2,false],medium:[1.4,1024,4,false],high:[1.75,2048,8,true],ultra:[2.25,2048,16,true]};
+    let visualQuality='high',visualAssets=null,visualOn=false,visualEnv=null,visualEnvTried=false;
+    try{const q=localStorage.getItem('wheelie-graphics-v1');if(Object.hasOwn(visualPresets,q))visualQuality=q;}catch(e){}
+    function visualTexture(kind){
+      const n=512,c=document.createElement('canvas');c.width=c.height=n;
+      const ctx=c.getContext('2d');if(!ctx)throw Error('Canvas unavailable');
+      let seed=kind==='road'?8121:kind==='ground'?511:821;
+      const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+      const base=kind==='road'?[123,126,128]:kind==='ground'?[126,148,91]:[165,143,117],img=ctx.createImageData(n,n);
+      for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+        const i=(y*n+x)*4,noise=(random()-.5)*49+6*Math.sin(x*Math.PI*8/n)*Math.sin(y*Math.PI*6/n)+4*Math.cos((x+y)*Math.PI*12/n);
+        for(let k=0;k<3;k++)img.data[i+k]=base[k]+noise;img.data[i+3]=255;
+      }
+      ctx.putImageData(img,0,0);
+      for(let i=0;i<3500;i++){
+        const x=random()*n,y=random()*n,w=.5+random()*1.9;
+        ctx.fillStyle=random()>.53?'rgba(255,255,255,.10)':'rgba(12,16,18,.13)';ctx.fillRect(x,y,w,w*.72);
+      }
+      if(kind==='road')for(let i=0;i<14;i++){
+        const x=random()*n;ctx.strokeStyle='rgba(18,20,23,.07)';ctx.lineWidth=.7+random()*2.2;
+        ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,n);ctx.stroke();
+      }
+      const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;
+      t.repeat.set(kind==='road'?3:kind==='ground'?250:5,kind==='ground'?250:500);return t;
+    }
+    function getVisualEnvironment(){
+      if(visualEnvTried)return visualEnv;visualEnvTried=true;
+      let source=null,pmrem=null;
+      try{
+        const c=document.createElement('canvas');c.width=512;c.height=256;
+        const ctx=c.getContext('2d');if(!ctx)return null;
+        const g=ctx.createLinearGradient(0,0,0,256);
+        g.addColorStop(0,'#5296d5');g.addColorStop(.48,'#d1e8f3');g.addColorStop(.52,'#a6af91');g.addColorStop(1,'#525b43');
+        ctx.fillStyle=g;ctx.fillRect(0,0,512,256);
+        const glow=ctx.createRadialGradient(185,74,1,185,74,35);
+        glow.addColorStop(0,'#fff8df');glow.addColorStop(1,'rgba(255,240,190,0)');
+        ctx.fillStyle=glow;ctx.fillRect(0,0,512,256);
+        source=new THREE.CanvasTexture(c);source.colorSpace=THREE.SRGBColorSpace;source.mapping=THREE.EquirectangularReflectionMapping;
+        pmrem=new THREE.PMREMGenerator(renderer);visualEnv=pmrem.fromEquirectangular(source);
+      }catch(e){console.warn('Optional reflections unavailable',e);}
+      finally{if(source)source.dispose();if(pmrem)pmrem.dispose();}
+      return visualEnv;
+    }
+    function initVisualAssets(){
+      if(visualAssets)return visualAssets;
+      const asphalt=visualTexture('road'),grass=visualTexture('ground'),dirt=visualTexture('shoulder');
+      const bump=new THREE.CanvasTexture(asphalt.image);bump.wrapS=bump.wrapT=THREE.RepeatWrapping;bump.repeat.copy(asphalt.repeat);
+      const skyCanvas=document.createElement('canvas');skyCanvas.width=512;skyCanvas.height=256;
+      const ctx=skyCanvas.getContext('2d');if(!ctx)throw Error('Sky unavailable');
+      const g=ctx.createLinearGradient(0,0,0,256);
+      g.addColorStop(0,'#328bd8');g.addColorStop(.36,'#90c9ee');g.addColorStop(.5,'#c9e3ee');g.addColorStop(.65,'#9aaeb3');g.addColorStop(1,'#84979d');
+      ctx.fillStyle=g;ctx.fillRect(0,0,512,256);
+      const skyTex=new THREE.CanvasTexture(skyCanvas);skyTex.colorSpace=THREE.SRGBColorSpace;skyTex.mapping=THREE.EquirectangularReflectionMapping;
+      scene.add(sun.target);
+      visualAssets={asphalt,grass,dirt,bump,skyTex,oldBackground:scene.background};return visualAssets;
+    }
+    function visualShadowSize(n){
+      if(sun.shadow.mapSize.x===n&&sun.shadow.mapSize.y===n)return;
+      if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
+      sun.shadow.mapSize.set(n,n);sun.shadow.needsUpdate=true;
+    }
+    function applyLevelOneVisuals(){
+      if(currentLevel!==1){
+        if(!visualOn)return;visualOn=false;
+        scene.background=visualAssets.oldBackground;
+        roadMat.map=roadMat.bumpMap=groundMat.map=shoulderMat.map=null;
+        for(const m of [roadMat,groundMat,shoulderMat])m.needsUpdate=true;
+        scene.environment=null;scene.environmentIntensity=1;
+        renderer.setPixelRatio(Math.min(devicePixelRatio,2));visualShadowSize(1024);
+        sun.position.set(-16,24,18);sun.target.position.set(0,0,0);
+        Object.assign(sun.shadow.camera,{left:-28,right:28,top:28,bottom:-28});sun.shadow.camera.updateProjectionMatrix();
+        sun.shadow.bias=0;sun.shadow.normalBias=.02;return;
+      }
+      let a;try{a=initVisualAssets();}catch(e){console.warn('Optional visual textures unavailable',e);return;}
+      visualOn=true;
+      const [ratio,shadow,aniso,reflect]=visualPresets[visualQuality];
+      renderer.setPixelRatio(Math.min(devicePixelRatio,ratio));
+      visualShadowSize(Math.min(renderer.capabilities.maxTextureSize,shadow));
+      for(const t of [a.asphalt,a.grass,a.dirt,a.bump]){t.anisotropy=Math.min(aniso,renderer.capabilities.getMaxAnisotropy());t.needsUpdate=true;}
+      roadMat.map=a.asphalt;roadMat.bumpMap=visualQuality==='low'?null:a.bump;roadMat.bumpScale=.035;
+      groundMat.map=a.grass;shoulderMat.map=a.dirt;
+      roadMat.color.setHex(0xc5c8cd);roadMat.roughness=.89;
+      groundMat.color.setHex(0x9fc77f);shoulderMat.color.setHex(0xd2b99a);
+      for(const m of [roadMat,groundMat,shoulderMat])m.needsUpdate=true;
+      scene.background=a.skyTex;scene.fog.color.setHex(0xc0dce9);scene.fog.near=80;scene.fog.far=275;
+      hemi.color.setHex(0xd5eaff);hemi.groundColor.setHex(0x7c8062);hemi.intensity=1.55;
+      sun.color.setHex(0xffead0);sun.intensity=2.65;renderer.toneMappingExposure=1.13;
+      Object.assign(sun.shadow.camera,{left:-24,right:24,top:24,bottom:-24});sun.shadow.camera.updateProjectionMatrix();
+      sun.shadow.bias=-.00012;sun.shadow.normalBias=.035;
+      const env=reflect?getVisualEnvironment():null;scene.environment=env?env.texture:null;scene.environmentIntensity=.45;
+    }
+    function updateLevelOneVisuals(){
+      if(!visualOn||!visualAssets)return;
+      const a=visualAssets;
+      a.asphalt.offset.y=a.bump.offset.y=a.dirt.offset.y=(distance/4)%1;a.grass.offset.y=(distance/8)%1;
+      const z=Math.round((rider.position.z-7)*2)/2;
+      sun.target.position.set(0,0,z);sun.position.set(-16,24,z+18);
+    }
+    const visualSelects=[...document.querySelectorAll('.visualQualitySelect')];
+    for(const select of visualSelects){
+      select.value=visualQuality;
+      select.addEventListener('change',()=>{
+        if(!Object.hasOwn(visualPresets,select.value))return;visualQuality=select.value;
+        for(const other of visualSelects)other.value=visualQuality;
+        try{localStorage.setItem('wheelie-graphics-v1',visualQuality);}catch(e){}
+        if(currentLevel===1&&initialSceneReady){applyLevelOneVisuals();updateLevelOneVisuals();}
+      });
+    }
+
     function applyLevelWeather(){
+      if(visualAssets)scene.background=visualAssets.oldBackground;
       const wet=levelConfig.wet,extreme=!!levelConfig.extreme;
       scene.background.setHex(extreme?0xffb574:wet?0x617887:0x82d6ff);
       scene.fog.color.setHex(extreme?0xf2b38a:wet?0x758997:0xa8dded);
@@ -4668,6 +4784,7 @@
       rainLines.visible=wet;wetPuddles.visible=wet;
       rainMarkerPosts.visible=wet;rainMarkerReflectors.visible=wet;
       document.body.classList.toggle('rain-level',wet);
+      applyLevelOneVisuals();
     }
 
     // El plano es una vista de la carretera REAL (recta y periódica).
@@ -5238,6 +5355,7 @@
       updateRain(paused||!active?0:dt);
       updateLevelTransition(dt);
       updateEngineAudio(dt);
+      updateLevelOneVisuals();
       renderer.render(scene,camera);
     }
 
@@ -5329,6 +5447,7 @@
         camera.lookAt(.48,1.23,-7.20);
         camera.updateMatrixWorld(true);
         // Compilar y dibujar la primera imagen bajo la cubierta opaca.
+        applyLevelOneVisuals();updateLevelOneVisuals();
         renderer.render(scene,camera);
         initialSceneReady=true;
         startBtn.disabled=false;
